@@ -420,7 +420,14 @@ document.addEventListener("keydown", (e) => {
 
 async function submitQuizAnswer() {
   const input = document.getElementById("quizInput");
+  const submitBtn = document.getElementById("quizSubmitBtn");
+  // 先立刻鎖住輸入框與按鈕，避免網路回應還沒回來前，重複按 Enter／按鈕造成同一題送出兩次、
+  // 或是下一題打字時被判成上一題的答案（送出後到後端回應之間有網路延遲，這段時間一定要鎖住）
   if (input.disabled) return;
+  input.disabled = true;
+  submitBtn.disabled = true;
+  submitBtn.textContent = "送出中…";
+
   const { word: w, mode } = state.quizWords[state.quizIndex];
   const given = input.value.trim();
   const correct = checkAnswer(w, mode, given);
@@ -439,8 +446,9 @@ async function submitQuizAnswer() {
     ? "答對了！"
     : `答錯了。正確答案：${mode === "zh" ? w.zh : w.en}`;
 
-  input.disabled = true;
-  document.getElementById("quizSubmitBtn").classList.add("hidden");
+  submitBtn.disabled = false;
+  submitBtn.textContent = "送出答案";
+  submitBtn.classList.add("hidden");
   document.getElementById("quizNextBtn").classList.remove("hidden");
   renderQuizDots();
 }
