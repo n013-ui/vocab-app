@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>單字卡 · 每日背誦與測驗</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,500;0,600;1,500&family=Noto+Sans+TC:wght@400;500;700;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- ===== 示範用控制列（正式上線後可移除，只是方便你現在預覽各種情境） ===== -->
+<div id="demoBar" class="demo-bar">
+  <span class="demo-label">雛形示範控制</span>
+  <label>模擬星期：
+    <select id="demoDay">
+      <option value="1">週一</option>
+      <option value="2">週二</option>
+      <option value="3">週三</option>
+      <option value="4">週四</option>
+      <option value="5">週五</option>
+      <option value="6">週六</option>
+      <option value="7">週日（本週複習）</option>
+    </select>
+  </label>
+  <button id="demoReset" class="demo-btn">清除示範資料</button>
+</div>
+
+<!-- ===== 登入畫面 ===== -->
+<section id="screen-login" class="screen active">
+  <div class="login-card">
+    <p class="brand-eyebrow">國中升高中單字系統</p>
+    <h1 class="brand-title">今天，先背十個字</h1>
+    <p class="brand-sub">帳號密碼由老師提供。範例帳號：<b>demo</b>／密碼：<b>1234</b></p>
+    <form id="loginForm">
+      <label>帳號
+        <input type="text" id="loginUser" placeholder="輸入帳號" required>
+      </label>
+      <label>密碼
+        <input type="password" id="loginPass" placeholder="輸入密碼" required>
+      </label>
+      <button type="submit" class="btn btn-primary">登入</button>
+      <p id="loginError" class="error-text"></p>
+    </form>
+  </div>
+</section>
+
+<!-- ===== 主畫面（登入後） ===== -->
+<div id="app" class="app">
+
+  <header class="topbar">
+    <div>
+      <p class="topbar-name" id="studentName">同學</p>
+      <p class="topbar-range" id="assignRange">尚未指派範圍</p>
+    </div>
+    <div class="topbar-right">
+      <p class="topbar-score" id="topbarScore">累計 0 分</p>
+      <button id="logoutBtn" class="btn btn-ghost">登出</button>
+    </div>
+  </header>
+
+  <main id="views">
+
+    <!-- 首頁 Dashboard -->
+    <section id="view-home" class="view">
+      <div class="today-card">
+        <p class="today-tag" id="todayTag">週二 · 每日十字</p>
+        <p class="today-range" id="todayRange">題號 11–20</p>
+        <h2 id="todayHeading">先看過今天的十個單字，背熟再測驗</h2>
+        <button class="btn btn-primary btn-lg" id="goStudyBtn">看今日單字</button>
+      </div>
+
+      <div class="action-grid">
+        <button class="action-card" id="goQuizBtn">
+          <span class="action-title">開始測驗</span>
+          <span class="action-sub">中文卷／英文卷</span>
+        </button>
+        <button class="action-card" id="goWrongBtn">
+          <span class="action-title">錯題本</span>
+          <span class="action-sub" id="wrongCount">目前 0 題待複習</span>
+        </button>
+      </div>
+
+      <p class="hint-text" id="sundayHint"></p>
+    </section>
+
+    <!-- 背誦（單字卡） -->
+    <section id="view-study" class="view">
+      <div class="view-head">
+        <button class="btn btn-text" data-back>← 返回</button>
+        <p class="view-title" id="studyTitle">今日單字</p>
+      </div>
+      <div class="progress-dots" id="studyDots"></div>
+      <div class="flashcard" id="flashcard">
+        <p class="card-index" id="cardIndex">1 / 10</p>
+        <p class="card-en" id="cardEn">word</p>
+        <p class="card-zh hidden" id="cardZh">意思</p>
+        <p class="card-flip-hint" id="cardFlipHint">點卡片看中文意思</p>
+      </div>
+      <div class="study-nav">
+        <button class="btn btn-ghost" id="prevCardBtn">上一個</button>
+        <button class="btn btn-primary" id="nextCardBtn">下一個</button>
+      </div>
+      <button class="btn btn-primary btn-lg btn-block hidden" id="studyDoneBtn">背完了，去測驗</button>
+    </section>
+
+    <!-- 測驗選擇 -->
+    <section id="view-quizpick" class="view">
+      <div class="view-head">
+        <button class="btn btn-text" data-back>← 返回</button>
+        <p class="view-title">選擇測驗方式</p>
+      </div>
+      <p class="quiz-desc" id="quizPickDesc">將測驗 10 個單字</p>
+      <div class="pick-grid">
+        <button class="pick-card" data-mode="zh">
+          <span class="pick-title">中文卷</span>
+          <span class="pick-sub">看英文，輸入中文意思</span>
+        </button>
+        <button class="pick-card" data-mode="en">
+          <span class="pick-title">英文卷</span>
+          <span class="pick-sub">看中文，輸入英文單字</span>
+        </button>
+      </div>
+    </section>
+
+    <!-- 測驗進行中 -->
+    <section id="view-quiz" class="view">
+      <div class="view-head">
+        <button class="btn btn-text" data-back>← 中止測驗</button>
+        <p class="view-title" id="quizTitle">中文卷</p>
+      </div>
+      <div class="progress-dots" id="quizDots"></div>
+      <div class="quiz-card">
+        <p class="quiz-index" id="quizIndex">第 1 / 10 題</p>
+        <p class="quiz-prompt" id="quizPrompt">word</p>
+        <input type="text" id="quizInput" class="quiz-input" placeholder="輸入答案" autocomplete="off">
+        <div id="quizFeedback" class="quiz-feedback hidden"></div>
+        <button class="btn btn-primary btn-lg btn-block" id="quizSubmitBtn">送出答案</button>
+        <button class="btn btn-primary btn-lg btn-block hidden" id="quizNextBtn">下一題</button>
+      </div>
+    </section>
+
+    <!-- 測驗結果 -->
+    <section id="view-result" class="view">
+      <div class="view-head">
+        <p class="view-title">測驗結果</p>
+      </div>
+      <div class="result-card">
+        <p class="result-score" id="resultScore">8 / 10</p>
+        <p class="result-sub" id="resultSub">答對 8 題，答錯 2 題已加入錯題本</p>
+        <p class="result-points" id="resultPoints">這次測驗獲得 0 分</p>
+      </div>
+      <ul class="result-list" id="resultList"></ul>
+      <button class="btn btn-primary btn-lg btn-block" id="backHomeBtn">回首頁</button>
+    </section>
+
+    <!-- 錯題本 -->
+    <section id="view-wrong" class="view">
+      <div class="view-head">
+        <button class="btn btn-text" data-back>← 返回</button>
+        <p class="view-title">錯題本</p>
+      </div>
+      <ul class="wrong-list" id="wrongList"></ul>
+      <button class="btn btn-primary btn-lg btn-block" id="retestWrongBtn">重新測驗錯題</button>
+    </section>
+
+  </main>
+</div>
+
+<script src="words-data.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
