@@ -341,11 +341,17 @@ document.getElementById("studyDoneBtn").addEventListener("click", () => openQuiz
 // ------------------------------------------------------------------------
 function openQuizPick(source) {
   state.quizSource = source;
-  let words;
-  if (source === "week") words = state.assignment.weekWords;
-  else if (source === "wrong") words = state.wrongBank.map(w => findWord(w.wordId)).filter(Boolean);
-  else words = currentStudyWords();
-  state.pendingQuizWords = words;
+  // 錯題本重測：每一題都用「當初答錯的那個模式」出題，不用再選一次中文卷／英文卷
+  if (source === "wrong") {
+    state.quizMode = null;
+    state.pendingQuizWords = state.wrongBank
+      .map(w => ({ word: findWord(w.wordId), mode: w.mode }))
+      .filter(item => item.word);
+    startQuiz();
+    return;
+  }
+  const words = source === "week" ? state.assignment.weekWords : currentStudyWords();
+  state.pendingWords = words;
   document.getElementById("quizPickDesc").textContent = `將測驗 ${words.length} 個單字`;
   showView("view-quizpick");
 }
@@ -356,6 +362,7 @@ document.getElementById("retestWrongBtn").addEventListener("click", () => openQu
 document.querySelectorAll(".pick-card").forEach(btn => {
   btn.addEventListener("click", () => {
     state.quizMode = btn.dataset.mode;
+    state.pendingQuizWords = state.pendingWords.map(w => ({ word: w, mode: state.quizMode }));
     startQuiz();
   });
 });
@@ -367,7 +374,8 @@ function startQuiz() {
   state.quizWords = shuffle(state.pendingQuizWords);
   state.quizIndex = 0;
   state.quizAnswers = [];
-  document.getElementById("quizTitle").textContent = state.quizMode === "zh" ? "中文卷" : "英文卷";
+  document.getElementById("quizTitle").textContent =
+    state.quizSource === "wrong" ? "錯題重測" : (state.quizMode === "zh" ? "中文卷" : "英文卷");
   renderQuizDots();
   renderQuizQuestion();
   showView("view-quiz");
@@ -383,9 +391,9 @@ function renderQuizDots() {
 }
 
 function renderQuizQuestion() {
-  const w = state.quizWords[state.quizIndex];
+  const { word: w, mode } = state.quizWords[state.quizIndex];
   document.getElementById("quizIndex").textContent = `第 ${state.quizIndex + 1} / ${state.quizWords.length} 題`;
-  document.getElementById("quizPrompt").textContent = state.quizMode === "zh" ? w.en : w.zh;
+  document.getElementById("quizPrompt").textContent = mode === "zh" ? w.en : w.zh;
   const input = document.getElementById("quizInput");
   input.value = "";
   input.disabled = false;
@@ -396,20 +404,30 @@ function renderQuizQuestion() {
 }
 
 document.getElementById("quizSubmitBtn").addEventListener("click", submitQuizAnswer);
-document.getElementById("quizInput").addEventListener("keydown", (e) => {
-  if (e.key === "Enter") submitQuizAnswer();
+
+// 測驗中按 Enter：還沒作答就送出答案，已經作答完就直接跳下一題（不用滑鼠點）
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Enter") return;
+  if (!document.getElementById("view-quiz").classList.contains("active")) return;
+  if (!document.getElementById("quizNextBtn").classList.contains("hidden")) {
+    e.preventDefault();
+    document.getElementById("quizNextBtn").click();
+  } else if (!document.getElementById("quizSubmitBtn").classList.contains("hidden")) {
+    e.preventDefault();
+    submitQuizAnswer();
+  }
 });
 
 async function submitQuizAnswer() {
   const input = document.getElementById("quizInput");
   if (input.disabled) return;
-  const w = state.quizWords[state.quizIndex];
+  const { word: w, mode } = state.quizWords[state.quizIndex];
   const given = input.value.trim();
-  const correct = checkAnswer(w, state.quizMode, given);
+  const correct = checkAnswer(w, mode, given);
   state.lastGiven = given;
-  const scoreResult = await apiSubmitAnswer({ word: w, mode: state.quizMode, correct });
+  const scoreResult = await apiSubmitAnswer({ word: w, mode, correct });
   state.quizAnswers[state.quizIndex] = {
-    word: w, correct, given,
+    word: w, mode, correct, given,
     scored: !!scoreResult.firstAttempt, delta: scoreResult.delta || 0,
   };
   if (typeof scoreResult.newScore === "number") updateTopbarScore(scoreResult.newScore);
@@ -419,7 +437,7 @@ async function submitQuizAnswer() {
   fb.classList.add(correct ? "correct" : "wrong");
   fb.textContent = correct
     ? "答對了！"
-    : `答錯了。正確答案：${state.quizMode === "zh" ? w.zh : w.en}`;
+    : `答錯了。正確答案：${mode === "zh" ? w.zh : w.en}`;
 
   input.disabled = true;
   document.getElementById("quizSubmitBtn").classList.add("hidden");
@@ -460,11 +478,16 @@ async function renderQuizResult() {
     const pointTag = a.scored
       ? `<span class="point-tag earned">${a.delta > 0 ? "+" : ""}${formatScore(a.delta)} 分</span>`
       : `<span class="point-tag">不計分</span>`;
+    // 錯題重測是混合中文卷／英文卷出題，額外標示這題當時考的是哪一種
+    const modeTag = state.quizSource === "wrong"
+      ? `<span class="point-tag">${a.mode === "zh" ? "中文卷" : "英文卷"}</span>`
+      : "";
     return `
     <li class="${a.correct ? "correct" : "wrong"}">
       <span>${a.word.en}／${a.word.zh}</span>
       <span class="answer-col">
         <span>${a.correct ? "✓" : "✕ 你答：" + (a.given || "（空白）")}</span>
+        ${modeTag}
         ${pointTag}
       </span>
     </li>`;
