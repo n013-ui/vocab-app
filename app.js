@@ -180,6 +180,7 @@ const state = {
   })(),
   assignment: null,        // 最近一次 apiGetAssignment() 的結果
   wrongBank: [],           // 最近一次 apiGetWrongBank() 的結果
+  studyWords: [],          // 目前正在背誦／即將測驗的單字（今日／本週／點選的某一天）
   studyIndex: 0,
   studyFlipped: {},
   quizMode: null,          // "zh" or "en"
@@ -266,6 +267,65 @@ async function renderHome() {
   const wb = await apiGetWrongBank();
   state.wrongBank = wb.items || [];
   document.getElementById("wrongCount").textContent = `目前 ${state.wrongBank.length} 題待複習`;
+
+  renderWeekDays();
+}
+
+// ------------------------------------------------------------------------
+// 本週進度：列出週一~週六六天各自的題號範圍，不限「今天」，方便回補或超前
+// ------------------------------------------------------------------------
+function assignmentDailyCount() {
+  const a = state.assignment;
+  return Math.max(1, Math.round((a.weekEnd - a.weekStart + 1) / 6));
+}
+
+function weekDayRange(day) {
+  const a = state.assignment;
+  const dc = assignmentDailyCount();
+  const start = a.weekStart + (day - 1) * dc;
+  const end = Math.min(start + dc - 1, a.weekEnd);
+  return { start, end };
+}
+
+function weekDayWords(day) {
+  const { start, end } = weekDayRange(day);
+  return (state.assignment.weekWords || []).filter(w => w.id >= start && w.id <= end);
+}
+
+function renderWeekDays() {
+  const a = state.assignment;
+  const list = document.getElementById("weekDaysList");
+  const items = [];
+  for (let day = 1; day <= 6; day++) {
+    const { start, end } = weekDayRange(day);
+    const empty = start > a.weekEnd;
+    const isToday = a.weekday === day;
+    items.push(`
+      <li class="week-day-item${isToday ? " is-today" : ""}${empty ? " is-empty" : ""}" data-day="${day}">
+        <span class="week-day-label">${DAY_NAMES[day]}</span>
+        <span class="week-day-range">${empty ? "本週題庫已用完" : `題號 ${start}~${end}`}</span>
+        ${isToday ? '<span class="week-day-tag today">今天</span>' : ""}
+      </li>`);
+  }
+  list.innerHTML = items.join("");
+}
+
+document.getElementById("weekDaysList").addEventListener("click", (e) => {
+  const li = e.target.closest(".week-day-item");
+  if (!li || li.classList.contains("is-empty")) return;
+  startDayStudy(Number(li.dataset.day));
+});
+
+function startDayStudy(day) {
+  const words = weekDayWords(day);
+  if (!words.length) return;
+  state.studyWords = words;
+  state.studyIndex = 0;
+  state.studyFlipped = {};
+  document.getElementById("studyTitle").textContent = `${DAY_NAMES[day]}單字`;
+  renderStudyDots();
+  renderStudyCard();
+  showView("view-study");
 }
 
 // 雛形示範控制列：只影響本機示範模式（APPS_SCRIPT_URL 未設定時）
@@ -286,10 +346,11 @@ if (APPS_SCRIPT_URL) {
 // 背誦（單字卡）
 // ------------------------------------------------------------------------
 function currentStudyWords() {
-  return state.assignment.weekday === 7 ? state.assignment.weekWords : state.assignment.todayWords;
+  return state.studyWords;
 }
 
 document.getElementById("goStudyBtn").addEventListener("click", () => {
+  state.studyWords = state.assignment.weekday === 7 ? state.assignment.weekWords : state.assignment.todayWords;
   state.studyIndex = 0;
   state.studyFlipped = {};
   document.getElementById("studyTitle").textContent = state.assignment.weekday === 7 ? "本週單字總覽" : "今日單字";
@@ -334,12 +395,13 @@ document.getElementById("nextCardBtn").addEventListener("click", () => {
   const words = currentStudyWords();
   if (state.studyIndex < words.length - 1) { state.studyIndex++; renderStudyCard(); }
 });
-document.getElementById("studyDoneBtn").addEventListener("click", () => openQuizPick("daily"));
+// 背完卡片按「去測驗」：不管背的是今天、整週、還是點某一天的進度，都拿剛剛背的那份單字去測驗
+document.getElementById("studyDoneBtn").addEventListener("click", () => openQuizPick(state.studyWords, "daily"));
 
 // ------------------------------------------------------------------------
 // 測驗：選擇中文卷／英文卷
 // ------------------------------------------------------------------------
-function openQuizPick(source) {
+function openQuizPick(words, source) {
   state.quizSource = source;
   // 錯題本重測：每一題都用「當初答錯的那個模式」出題，不用再選一次中文卷／英文卷
   if (source === "wrong") {
@@ -350,14 +412,16 @@ function openQuizPick(source) {
     startQuiz();
     return;
   }
-  const words = source === "week" ? state.assignment.weekWords : currentStudyWords();
   state.pendingWords = words;
   document.getElementById("quizPickDesc").textContent = `將測驗 ${words.length} 個單字`;
   showView("view-quizpick");
 }
-document.getElementById("goQuizBtn").addEventListener("click", () =>
-  openQuizPick(state.assignment.weekday === 7 ? "week" : "daily"));
-document.getElementById("retestWrongBtn").addEventListener("click", () => openQuizPick("wrong"));
+document.getElementById("goQuizBtn").addEventListener("click", () => {
+  const source = state.assignment.weekday === 7 ? "week" : "daily";
+  const words = source === "week" ? state.assignment.weekWords : state.assignment.todayWords;
+  openQuizPick(words, source);
+});
+document.getElementById("retestWrongBtn").addEventListener("click", () => openQuizPick([], "wrong"));
 
 document.querySelectorAll(".pick-card").forEach(btn => {
   btn.addEventListener("click", () => {

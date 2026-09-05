@@ -128,6 +128,22 @@ main#views{padding:4px 20px 50px;}
 .action-sub{font-size:12px; color:var(--ink-soft);}
 .hint-text{font-size:13px; color:var(--gold); font-weight:700; text-align:center;}
 
+/* ---------- 本週進度（可回補／超前） ---------- */
+.week-days-card{margin-bottom:20px;}
+.week-days-title{font-weight:800; font-size:13.5px; margin:0 0 4px;}
+.week-days-sub{font-size:12px; color:var(--ink-soft); margin:0 0 10px;}
+.week-days-list{list-style:none; padding:0; margin:0; display:flex; flex-direction:column; gap:8px;}
+.week-day-item{
+  background:var(--card); border:1.5px solid var(--border); border-radius:12px; padding:11px 14px;
+  display:flex; justify-content:space-between; align-items:center; cursor:pointer;
+}
+.week-day-item.is-today{border-color:var(--accent);}
+.week-day-item.is-empty{opacity:.4; cursor:default;}
+.week-day-label{font-weight:800; font-size:13.5px; min-width:44px;}
+.week-day-range{color:var(--ink-soft); font-size:12.5px; flex:1; margin-left:10px;}
+.week-day-tag{font-size:11px; font-weight:700; border-radius:8px; padding:3px 8px; white-space:nowrap;}
+.week-day-tag.today{background:var(--success-bg); color:var(--success);}
+
 /* ---------- 單字卡（背誦） ---------- */
 .progress-dots{display:flex; gap:6px; justify-content:center; margin-bottom:16px; flex-wrap:wrap;}
 .progress-dots span{width:7px; height:7px; border-radius:50%; background:var(--border);}
