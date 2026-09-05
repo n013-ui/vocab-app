@@ -85,9 +85,18 @@
 
       <p class="hint-text" id="sundayHint"></p>
 
+      <p id="paceBanner" class="pace-banner hidden"></p>
+
       <div class="week-days-card">
-        <p class="week-days-title">本週進度</p>
-        <p class="week-days-sub">不限今天，點任一天都可以背誦、測驗（回補進度／超前進度都可以）</p>
+        <div class="week-days-head">
+          <button class="week-nav-btn" id="weekPrevBtn" aria-label="上一週" type="button">‹</button>
+          <div class="week-days-headtext">
+            <p class="week-days-title" id="weekPanelTitle">本週進度</p>
+            <p class="week-days-sub" id="weekPanelSub">題號 1~60</p>
+          </div>
+          <button class="week-nav-btn" id="weekNextBtn" aria-label="下一週" type="button">›</button>
+        </div>
+        <p class="week-days-hint">不限今天，點任一天都可以背誦、測驗（回補進度／超前進度都可以）</p>
         <ul class="week-days-list" id="weekDaysList"></ul>
       </div>
     </section>
@@ -138,13 +147,17 @@
         <p class="view-title" id="quizTitle">中文卷</p>
       </div>
       <div class="progress-dots" id="quizDots"></div>
-      <div class="quiz-card">
+      <div class="quiz-card" id="quizCard">
         <p class="quiz-index" id="quizIndex">第 1 / 10 題</p>
         <p class="quiz-prompt" id="quizPrompt">word</p>
         <input type="text" id="quizInput" class="quiz-input" placeholder="輸入答案" autocomplete="off">
         <div id="quizFeedback" class="quiz-feedback hidden"></div>
         <button class="btn btn-primary btn-lg btn-block" id="quizSubmitBtn">送出答案</button>
         <button class="btn btn-primary btn-lg btn-block hidden" id="quizNextBtn">下一題</button>
+        <div id="quizBusyOverlay" class="quiz-busy-overlay hidden">
+          <span class="spinner dark"></span>
+          <span>批改中…</span>
+        </div>
       </div>
     </section>
 

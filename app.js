@@ -82,11 +82,24 @@ function demoGetAssignment() {
   }
   return {
     ok: true,
+    weekIndex,
     weekStart, weekEnd, weekday, todayStart, todayEnd,
     todayWords,
     weekWords: demoGetWordsByRange(weekStart, weekEnd),
     score: demoLoadStore().score || 0,
+    dailyCount: DAILY_COUNT,
+    programStartNum: 1,
+    wordBankMax: WORD_BANK_FULL.length,
   };
+}
+
+// 本機示範模式的「學習進度」：掃 localStorage 裡的作答歷史，找出「答對過」的題號
+// （不管是中文卷還是英文卷，只要對過一次就算精熟），邏輯跟 Code.gs 的 handleGetProgress 一致
+function demoGetProgress() {
+  const s = demoLoadStore();
+  const mastered = new Set();
+  (s.history || []).forEach(h => { if (h.correct) mastered.add(h.wordId); });
+  return { ok: true, masteredIds: [...mastered] };
 }
 
 // 計分規則：同一個單字＋同一種測驗模式（zh/en），只有「這帳號有史以來第一次作答」
@@ -163,6 +176,11 @@ async function apiGetWrongBank() {
   return callApi("getWrongBank", { account: state.user });
 }
 
+async function apiGetProgress() {
+  if (!APPS_SCRIPT_URL) return demoGetProgress();
+  return callApi("getProgress", { account: state.user });
+}
+
 // ------------------------------------------------------------------------
 // 狀態管理
 // ------------------------------------------------------------------------
@@ -180,6 +198,8 @@ const state = {
   })(),
   assignment: null,        // 最近一次 apiGetAssignment() 的結果
   wrongBank: [],           // 最近一次 apiGetWrongBank() 的結果
+  masteredIds: new Set(),  // 最近一次 apiGetProgress() 的結果：答對過的題號（判斷完成度／進度用）
+  viewWeekIndex: null,     // 目前「本週進度」面板正在看第幾週（null＝目前實際那一週）
   studyWords: [],          // 目前正在背誦／即將測驗的單字（今日／本週／點選的某一天）
   studyIndex: 0,
   studyFlipped: {},
@@ -218,19 +238,37 @@ document.getElementById("loginForm").addEventListener("submit", async (e) => {
   const user = document.getElementById("loginUser").value;
   const pass = document.getElementById("loginPass").value;
   const submitBtn = e.target.querySelector("button[type=submit]");
-  submitBtn.disabled = true;
+  const userInput = document.getElementById("loginUser");
+  const passInput = document.getElementById("loginPass");
+  // 登入要打後端 API，網路慢的時候畫面容易看起來像沒反應：鎖住輸入框、
+  // 按鈕顯示「登入中…」加上轉圈動畫，讓學生清楚知道系統正在處理、不要一直重按
+  function setLoginLoading(loading) {
+    submitBtn.disabled = loading;
+    submitBtn.classList.toggle("is-loading", loading);
+    submitBtn.innerHTML = loading ? '<span class="spinner"></span>登入中…' : "登入";
+    userInput.disabled = loading;
+    passInput.disabled = loading;
+  }
+
+  setLoginLoading(true);
+  document.getElementById("loginError").textContent = "";
+
   const result = await apiLogin(user, pass);
-  submitBtn.disabled = false;
   if (!result.ok) {
+    setLoginLoading(false);
     document.getElementById("loginError").textContent = result.error || "帳號或密碼錯誤，請再試一次";
     return;
   }
+
   state.user = result.account;
-  document.getElementById("loginError").textContent = "";
   document.getElementById("studentName").textContent = result.name + " 同學";
+  // 密碼驗證通過後還要再打幾支 API 準備首頁資料（指派範圍／錯題本／進度），
+  // 這段期間繼續停在登入畫面顯示「登入中…」，等首頁資料都準備好才一次切過去，
+  // 避免中間出現「畫面空白、看起來像沒登入成功」的空檔
+  await renderHome();
   document.querySelector(".app").classList.add("active");
   document.getElementById("screen-login").classList.remove("active");
-  await renderHome();
+  setLoginLoading(false);
   showView("view-home");
 });
 
@@ -268,61 +306,151 @@ async function renderHome() {
   state.wrongBank = wb.items || [];
   document.getElementById("wrongCount").textContent = `目前 ${state.wrongBank.length} 題待複習`;
 
-  renderWeekDays();
+  const prog = await apiGetProgress();
+  state.masteredIds = new Set(prog.masteredIds || []);
+
+  state.viewWeekIndex = a.weekIndex; // 每次回首頁都重設回「目前實際那一週」
+  renderPaceBanner();
+  renderWeekPanel();
 }
 
 // ------------------------------------------------------------------------
-// 本週進度：列出週一~週六六天各自的題號範圍，不限「今天」，方便回補或超前
+// 週次／每日題號範圍換算（純前端算式）：programStartNum/dailyCount/wordBankMax
+// 由後端 getAssignment 回傳一次，之後任何一週都能直接算出來，不用再打 API。
+// 「目前實際那一週」的單字內容用後端剛給的 weekWords（即時對照 Google Sheets）；
+// 往前／往後翻看別週時，用 words-data.js 內建的完整題庫切，兩者同源資料。
 // ------------------------------------------------------------------------
-function assignmentDailyCount() {
+function weekRangeFor(weekIndex) {
   const a = state.assignment;
-  return Math.max(1, Math.round((a.weekEnd - a.weekStart + 1) / 6));
-}
-
-function weekDayRange(day) {
-  const a = state.assignment;
-  const dc = assignmentDailyCount();
-  const start = a.weekStart + (day - 1) * dc;
-  const end = Math.min(start + dc - 1, a.weekEnd);
+  const weekCount = a.dailyCount * 6;
+  const start = a.programStartNum + weekIndex * weekCount;
+  const end = Math.min(start + weekCount - 1, a.wordBankMax);
   return { start, end };
 }
 
-function weekDayWords(day) {
-  const { start, end } = weekDayRange(day);
-  return (state.assignment.weekWords || []).filter(w => w.id >= start && w.id <= end);
+function dayRangeFor(weekIndex, day) {
+  const a = state.assignment;
+  const { start: weekStart, end: weekEnd } = weekRangeFor(weekIndex);
+  const start = weekStart + (day - 1) * a.dailyCount;
+  const end = Math.min(start + a.dailyCount - 1, weekEnd);
+  return { start, end };
 }
 
-function renderWeekDays() {
+function wordsInRange(start, end) {
+  if (start > end) return [];
   const a = state.assignment;
+  if (start >= a.weekStart && end <= a.weekEnd) {
+    return (a.weekWords || []).filter(w => w.id >= start && w.id <= end);
+  }
+  return WORD_BANK_FULL.filter(w => w.id >= start && w.id <= end);
+}
+
+// 這個範圍內的題號是不是「全部都答對過」（不分中文卷／英文卷，對過一次就算）
+function isRangeMastered(start, end) {
+  if (start > end) return false;
+  for (let id = start; id <= end; id++) {
+    if (!state.masteredIds.has(id)) return false;
+  }
+  return true;
+}
+
+// ------------------------------------------------------------------------
+// 進度提示：只看「目前實際那一週」，比對「已經過去的天數裡有沒有全部完成」
+// 跟「還沒到的天數裡有沒有已經先完成」，落後就提醒、超前就鼓勵
+// ------------------------------------------------------------------------
+function renderPaceBanner() {
+  const a = state.assignment;
+  let missedDays = 0, aheadDays = 0;
+  for (let day = 1; day <= 6; day++) {
+    const { start, end } = dayRangeFor(a.weekIndex, day);
+    if (start > a.wordBankMax) continue;
+    const done = isRangeMastered(start, end);
+    const isPastDue = a.weekday === 7 || day < a.weekday; // 已經過去、理論上該完成的天
+    const isFuture = !isPastDue && day !== a.weekday;      // 還沒到、算超前
+    if (isPastDue && !done) missedDays++;
+    if (isFuture && done) aheadDays++;
+  }
+
+  const banner = document.getElementById("paceBanner");
+  if (missedDays > 0) {
+    banner.className = "pace-banner warn";
+    banner.textContent = `⏰ 本週還有 ${missedDays} 天的進度沒完成，記得找時間補回來！`;
+  } else if (aheadDays > 0) {
+    banner.className = "pace-banner success";
+    banner.textContent = `🎉 太棒了！已經超前完成本週 ${aheadDays} 天的進度！`;
+  } else {
+    banner.className = "pace-banner hidden";
+    banner.textContent = "";
+  }
+}
+
+// ------------------------------------------------------------------------
+// 本週進度面板：列出目前所選那一週週一~週六六天的題號範圍與完成狀態，
+// 不限「今天」，也可以用左右箭頭往前往後翻週，回補進度或超前進度都可以
+// ------------------------------------------------------------------------
+function renderWeekPanel() {
+  const a = state.assignment;
+  const wi = state.viewWeekIndex;
+  const { start: weekStart, end: weekEnd } = weekRangeFor(wi);
+  const rel = wi - a.weekIndex;
+  const label = rel === 0 ? "本週進度" : rel === -1 ? "上週進度" : rel === 1 ? "下週進度"
+    : `第 ${wi + 1} 週進度`;
+
+  document.getElementById("weekPanelTitle").textContent = label;
+  document.getElementById("weekPanelSub").textContent =
+    weekStart > a.wordBankMax ? "這一週已經超出題庫範圍了" : `題號 ${weekStart}~${weekEnd}`;
+  document.getElementById("weekPrevBtn").disabled = wi <= 0;
+  document.getElementById("weekNextBtn").disabled = weekRangeFor(wi + 1).start > a.wordBankMax;
+
   const list = document.getElementById("weekDaysList");
   const items = [];
   for (let day = 1; day <= 6; day++) {
-    const { start, end } = weekDayRange(day);
-    const empty = start > a.weekEnd;
-    const isToday = a.weekday === day;
+    const { start, end } = dayRangeFor(wi, day);
+    const empty = start > a.wordBankMax || start > weekEnd;
+    const isToday = rel === 0 && a.weekday === day;
+    const done = !empty && isRangeMastered(start, end);
+    const isPastDue = rel < 0 || (rel === 0 && (a.weekday === 7 || day < a.weekday));
+    let tag = "";
+    if (done) tag = '<span class="week-day-tag done">✓ 已完成</span>';
+    else if (isToday) tag = '<span class="week-day-tag today">今天</span>';
+    else if (isPastDue) tag = '<span class="week-day-tag pending">尚未完成</span>';
     items.push(`
-      <li class="week-day-item${isToday ? " is-today" : ""}${empty ? " is-empty" : ""}" data-day="${day}">
+      <li class="week-day-item${isToday ? " is-today" : ""}${done ? " is-done" : ""}${empty ? " is-empty" : ""}" data-week="${wi}" data-day="${day}">
         <span class="week-day-label">${DAY_NAMES[day]}</span>
-        <span class="week-day-range">${empty ? "本週題庫已用完" : `題號 ${start}~${end}`}</span>
-        ${isToday ? '<span class="week-day-tag today">今天</span>' : ""}
+        <span class="week-day-range">${empty ? "超出題庫範圍" : `題號 ${start}~${end}`}</span>
+        ${tag}
       </li>`);
   }
   list.innerHTML = items.join("");
 }
 
+document.getElementById("weekPrevBtn").addEventListener("click", () => {
+  if (state.viewWeekIndex <= 0) return;
+  state.viewWeekIndex--;
+  renderWeekPanel();
+});
+document.getElementById("weekNextBtn").addEventListener("click", () => {
+  if (weekRangeFor(state.viewWeekIndex + 1).start > state.assignment.wordBankMax) return;
+  state.viewWeekIndex++;
+  renderWeekPanel();
+});
+
 document.getElementById("weekDaysList").addEventListener("click", (e) => {
   const li = e.target.closest(".week-day-item");
   if (!li || li.classList.contains("is-empty")) return;
-  startDayStudy(Number(li.dataset.day));
+  startDayStudy(Number(li.dataset.week), Number(li.dataset.day));
 });
 
-function startDayStudy(day) {
-  const words = weekDayWords(day);
+function startDayStudy(weekIndex, day) {
+  const { start, end } = dayRangeFor(weekIndex, day);
+  const words = wordsInRange(start, end);
   if (!words.length) return;
   state.studyWords = words;
   state.studyIndex = 0;
   state.studyFlipped = {};
-  document.getElementById("studyTitle").textContent = `${DAY_NAMES[day]}單字`;
+  const rel = weekIndex - state.assignment.weekIndex;
+  const weekLabel = rel === 0 ? "" : rel === -1 ? "上週" : rel === 1 ? "下週" : `第${weekIndex + 1}週`;
+  document.getElementById("studyTitle").textContent = `${weekLabel}${DAY_NAMES[day]}單字`;
   renderStudyDots();
   renderStudyCard();
   showView("view-study");
@@ -438,6 +566,7 @@ function startQuiz() {
   state.quizWords = shuffle(state.pendingQuizWords);
   state.quizIndex = 0;
   state.quizAnswers = [];
+  setQuizBusy(false);
   document.getElementById("quizTitle").textContent =
     state.quizSource === "wrong" ? "錯題重測" : (state.quizMode === "zh" ? "中文卷" : "英文卷");
   renderQuizDots();
@@ -469,10 +598,29 @@ function renderQuizQuestion() {
 
 document.getElementById("quizSubmitBtn").addEventListener("click", submitQuizAnswer);
 
+// 防止「送出答案」「下一題」被連續誤觸（連按 Enter、雙擊）：兩次動作之間至少間隔
+// 400ms，避免答完題按太快，下一題還沒渲染好就把 Enter 又吃成「送出空白答案」
+let lastQuizActionAt = 0;
+function quizActionAllowed() {
+  const now = Date.now();
+  if (now - lastQuizActionAt < 400) return false;
+  lastQuizActionAt = now;
+  return true;
+}
+
+// 送出答案期間（等後端批改／寫入 Google Sheets 這段網路來回）整個測驗卡片鎖住、
+// 蓋上「批改中…」提示，讓學生清楚知道系統在處理、不會誤以為沒反應而一直按
+function setQuizBusy(busy) {
+  state.quizLocked = busy;
+  document.getElementById("quizCard").classList.toggle("is-busy", busy);
+  document.getElementById("quizBusyOverlay").classList.toggle("hidden", !busy);
+}
+
 // 測驗中按 Enter：還沒作答就送出答案，已經作答完就直接跳下一題（不用滑鼠點）
 document.addEventListener("keydown", (e) => {
-  if (e.key !== "Enter") return;
+  if (e.key !== "Enter" || e.repeat) return;
   if (!document.getElementById("view-quiz").classList.contains("active")) return;
+  if (state.quizLocked) { e.preventDefault(); return; }
   if (!document.getElementById("quizNextBtn").classList.contains("hidden")) {
     e.preventDefault();
     document.getElementById("quizNextBtn").click();
@@ -483,14 +631,14 @@ document.addEventListener("keydown", (e) => {
 });
 
 async function submitQuizAnswer() {
+  if (state.quizLocked || !quizActionAllowed()) return;
   const input = document.getElementById("quizInput");
   const submitBtn = document.getElementById("quizSubmitBtn");
-  // 先立刻鎖住輸入框與按鈕，避免網路回應還沒回來前，重複按 Enter／按鈕造成同一題送出兩次、
-  // 或是下一題打字時被判成上一題的答案（送出後到後端回應之間有網路延遲，這段時間一定要鎖住）
-  if (input.disabled) return;
+  // 先立刻鎖住輸入框、按鈕、整張測驗卡片，避免網路回應還沒回來前，重複按 Enter／
+  // 按鈕造成同一題送出兩次、或是下一題打字時被判成上一題的答案
   input.disabled = true;
   submitBtn.disabled = true;
-  submitBtn.textContent = "送出中…";
+  setQuizBusy(true);
 
   const { word: w, mode } = state.quizWords[state.quizIndex];
   const given = input.value.trim();
@@ -510,19 +658,22 @@ async function submitQuizAnswer() {
     ? "答對了！"
     : `答錯了。正確答案：${mode === "zh" ? w.zh : w.en}`;
 
+  setQuizBusy(false);
   submitBtn.disabled = false;
-  submitBtn.textContent = "送出答案";
   submitBtn.classList.add("hidden");
   document.getElementById("quizNextBtn").classList.remove("hidden");
   renderQuizDots();
 }
 
 document.getElementById("quizNextBtn").addEventListener("click", async () => {
+  if (state.quizLocked || !quizActionAllowed()) return;
   if (state.quizIndex < state.quizWords.length - 1) {
     state.quizIndex++;
     renderQuizQuestion();
   } else {
+    state.quizLocked = true; // 結算頁要重新抓一次首頁資料，鎖住避免這段期間誤觸
     await renderQuizResult();
+    state.quizLocked = false;
     showView("view-result");
   }
 });

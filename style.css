@@ -85,12 +85,23 @@ body{
   padding:12px 18px; cursor:pointer; transition:transform .08s ease, opacity .15s ease;
 }
 .btn:active{transform:scale(.98);}
+.btn:disabled{opacity:.65; cursor:default;}
 .btn-primary{background:var(--accent); color:#fff;}
 .btn-primary:hover{background:var(--accent-dark);}
 .btn-lg{padding:16px 20px; font-size:16px; border-radius:14px;}
 .btn-block{width:100%; margin-top:14px;}
 .btn-ghost{background:transparent; color:var(--ink-soft); border:1.5px solid var(--border);}
 .btn-text{background:none; color:var(--accent); padding:6px 0; font-weight:700;}
+
+/* 轉圈動畫（登入中／批改中共用） */
+.spinner{
+  width:16px; height:16px; border-radius:50%; display:inline-block;
+  border:2.5px solid rgba(255,255,255,.4); border-top-color:#fff;
+  animation:spin .7s linear infinite; vertical-align:-3px; margin-right:6px;
+}
+@keyframes spin{to{transform:rotate(360deg);}}
+.btn.is-loading{display:inline-flex; align-items:center; justify-content:center;}
+.spinner.dark{border-color:rgba(47,111,94,.25); border-top-color:var(--accent);}
 
 /* ---------- 頂欄 ---------- */
 .topbar{
@@ -128,21 +139,41 @@ main#views{padding:4px 20px 50px;}
 .action-sub{font-size:12px; color:var(--ink-soft);}
 .hint-text{font-size:13px; color:var(--gold); font-weight:700; text-align:center;}
 
-/* ---------- 本週進度（可回補／超前） ---------- */
+/* ---------- 進度提示（落後催促／超前鼓勵） ---------- */
+.pace-banner{
+  border-radius:14px; padding:12px 16px; font-size:13px; font-weight:700; margin:0 0 18px;
+  text-align:center; line-height:1.5;
+}
+.pace-banner.warn{background:#FBF1DE; color:#8A5A12;}
+.pace-banner.success{background:var(--success-bg); color:var(--success);}
+
+/* ---------- 本週進度（可回補／超前，可左右翻週） ---------- */
 .week-days-card{margin-bottom:20px;}
-.week-days-title{font-weight:800; font-size:13.5px; margin:0 0 4px;}
-.week-days-sub{font-size:12px; color:var(--ink-soft); margin:0 0 10px;}
+.week-days-head{display:flex; align-items:center; gap:10px; margin-bottom:2px;}
+.week-days-headtext{flex:1; text-align:center;}
+.week-nav-btn{
+  background:var(--card); border:1.5px solid var(--border); border-radius:10px;
+  width:34px; height:34px; font-size:18px; line-height:1; color:var(--accent); cursor:pointer;
+  flex-shrink:0;
+}
+.week-nav-btn:disabled{opacity:.35; cursor:default;}
+.week-days-title{font-weight:800; font-size:13.5px; margin:0;}
+.week-days-sub{font-size:12px; color:var(--ink-soft); margin:2px 0 0;}
+.week-days-hint{font-size:12px; color:var(--ink-soft); margin:8px 0 10px; text-align:center;}
 .week-days-list{list-style:none; padding:0; margin:0; display:flex; flex-direction:column; gap:8px;}
 .week-day-item{
   background:var(--card); border:1.5px solid var(--border); border-radius:12px; padding:11px 14px;
   display:flex; justify-content:space-between; align-items:center; cursor:pointer;
 }
 .week-day-item.is-today{border-color:var(--accent);}
+.week-day-item.is-done{border-color:var(--success); background:var(--success-bg);}
 .week-day-item.is-empty{opacity:.4; cursor:default;}
 .week-day-label{font-weight:800; font-size:13.5px; min-width:44px;}
 .week-day-range{color:var(--ink-soft); font-size:12.5px; flex:1; margin-left:10px;}
 .week-day-tag{font-size:11px; font-weight:700; border-radius:8px; padding:3px 8px; white-space:nowrap;}
 .week-day-tag.today{background:var(--success-bg); color:var(--success);}
+.week-day-tag.done{background:var(--success); color:#fff;}
+.week-day-tag.pending{background:var(--danger-bg); color:var(--danger);}
 
 /* ---------- 單字卡（背誦） ---------- */
 .progress-dots{display:flex; gap:6px; justify-content:center; margin-bottom:16px; flex-wrap:wrap;}
@@ -175,8 +206,16 @@ main#views{padding:4px 20px 50px;}
 /* ---------- 測驗進行 ---------- */
 .quiz-card{
   background:var(--card); border:1.5px solid var(--border); border-radius:22px; padding:30px 22px;
-  text-align:center;
+  text-align:center; position:relative;
 }
+.quiz-card.is-busy .quiz-index, .quiz-card.is-busy .quiz-prompt,
+.quiz-card.is-busy .quiz-input, .quiz-card.is-busy .quiz-feedback{opacity:.35;}
+.quiz-busy-overlay{
+  position:absolute; inset:0; border-radius:22px; background:rgba(255,255,255,.72);
+  display:flex; align-items:center; justify-content:center; gap:4px;
+  font-size:14px; font-weight:800; color:var(--accent-dark);
+}
+.quiz-busy-overlay.hidden{display:none;}
 .quiz-index{font-size:12px; color:var(--ink-soft); margin:0 0 8px;}
 .quiz-prompt{font-family:var(--serif); font-weight:600; font-size:28px; margin:0 0 22px;}
 .quiz-input{

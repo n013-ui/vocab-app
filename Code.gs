@@ -50,6 +50,7 @@ function doPost(e) {
       case "getAssignment": return jsonOutput(handleGetAssignment(body));
       case "submitAnswer": return jsonOutput(handleSubmitAnswer(body));
       case "getWrongBank": return jsonOutput(handleGetWrongBank(body));
+      case "getProgress": return jsonOutput(handleGetProgress(body));
       default: return jsonOutput({ ok: false, error: "未知的 action：" + action });
     }
   } catch (err) {
@@ -198,6 +199,10 @@ function handleGetAssignment({ account }) {
     todayWords: getWordsByRange_(words, a.todayStart, Math.min(a.todayEnd, maxId)),
     weekWords: getWordsByRange_(words, a.weekStart, Math.min(a.weekEnd, maxId)),
     score: config.score,
+    // 給前端算「其他週」範圍、和判斷是否落後/超前進度用（見前端 weekRangeFor/dayRangeFor）
+    dailyCount: config.dailyCount,
+    programStartNum: config.programStartNum,
+    wordBankMax: maxId,
   };
 }
 
@@ -285,6 +290,21 @@ function updateWrongBank_({ account, wordId, en, zh, mode, correct }) {
   } else {
     sheet.appendRow([account, wordId, en, zh, modeLabel, 1, new Date()]);
   }
+}
+
+// ------------------------------------------------------------------------
+// 取得學習進度（哪些題號已經「答對過」，不管是中文卷還是英文卷，只要對過一次
+// 就算精熟；前端用這個判斷每天/每週有沒有完成、目前是落後還是超前進度）
+// ------------------------------------------------------------------------
+function handleGetProgress({ account }) {
+  const { rows } = readTable_(SHEET_LOG);
+  const mastered = {};
+  rows.forEach(r => {
+    if (String(r["帳號"]) !== String(account)) return;
+    const isCorrect = r["是否正確"] === true || String(r["是否正確"]).toUpperCase() === "TRUE";
+    if (isCorrect) mastered[Number(r["題號"])] = true;
+  });
+  return { ok: true, masteredIds: Object.keys(mastered).map(Number) };
 }
 
 // ------------------------------------------------------------------------
