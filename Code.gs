@@ -210,35 +210,49 @@ function handleGetAssignment({ account }) {
 // 送出一題作答
 // ------------------------------------------------------------------------
 const MODE_LABEL = { zh: "中文卷", en: "英文卷" };
+const RESCORE_COOLDOWN_DAYS = 30; // 同一題隔多久重刷才能再拿分（避免無限刷分數）
 
 function handleSubmitAnswer({ account, wordId, en, zh, mode, given, correct }) {
   const modeLabel = MODE_LABEL[mode] || mode;
   const isCorrect = !!correct;
-  const firstAttempt = !hasPriorAttempt_(account, wordId, modeLabel);
+  const now = new Date();
+  const scoringEligible = isScoringEligible_(account, wordId, modeLabel, now);
 
   const logSheet = getSheet_(SHEET_LOG);
-  logSheet.appendRow([new Date(), account, wordId, en, zh, modeLabel, given || "", isCorrect]);
+  logSheet.appendRow([now, account, wordId, en, zh, modeLabel, given || "", isCorrect]);
 
   updateWrongBank_({ account, wordId, en, zh, mode, correct: isCorrect });
 
   let delta = 0;
   let newScore = null;
-  if (firstAttempt) {
+  if (scoringEligible) {
     delta = isCorrect ? 1 : -0.5;
     newScore = addStudentScore_(account, delta);
   }
 
-  return { ok: true, firstAttempt, delta, newScore };
+  // API 欄位名稱維持 firstAttempt（前端沿用），但意義已經不只是「有史以來第一次」，
+  // 而是「這次算不算計分」：真正第一次作答、或是距離上一次作答這題已經超過
+  // RESCORE_COOLDOWN_DAYS 天（特殊設計：讓學生一個月後回頭複習舊字仍然能得分，
+  // 對抗學習曲線下滑；但同一題不能無限刷分數，冷卻時間內重複作答一律不計分）
+  return { ok: true, firstAttempt: scoringEligible, delta, newScore };
 }
 
-// 有沒有這個帳號＋題號＋測驗類型的舊作答紀錄（用來判斷是不是「有史以來第一次作答」）
-function hasPriorAttempt_(account, wordId, modeLabel) {
+// 這次作答算不算「可以計分」：從來沒作答過這題（這個帳號＋題號＋測驗類型），
+// 或是距離「上一次作答這題」已經超過 RESCORE_COOLDOWN_DAYS 天
+function isScoringEligible_(account, wordId, modeLabel, now) {
   const { rows } = readTable_(SHEET_LOG);
-  return rows.some(r =>
-    String(r["帳號"]) === String(account) &&
-    Number(r["題號"]) === Number(wordId) &&
-    String(r["測驗類型"]) === modeLabel
-  );
+  let lastAttemptTime = null;
+  rows.forEach(r => {
+    if (String(r["帳號"]) !== String(account)) return;
+    if (Number(r["題號"]) !== Number(wordId)) return;
+    if (String(r["測驗類型"]) !== modeLabel) return;
+    const t = r["時間"] instanceof Date ? r["時間"] : new Date(r["時間"]);
+    if (isNaN(t.getTime())) return;
+    if (!lastAttemptTime || t > lastAttemptTime) lastAttemptTime = t;
+  });
+  if (!lastAttemptTime) return true; // 從來沒作答過，真正的第一次
+  const daysSince = (now - lastAttemptTime) / (1000 * 60 * 60 * 24);
+  return daysSince >= RESCORE_COOLDOWN_DAYS;
 }
 
 // 把 delta 加進「學生」工作表該帳號的「累計分數」欄，回傳更新後的分數

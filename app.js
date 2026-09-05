@@ -102,14 +102,20 @@ function demoGetProgress() {
   return { ok: true, masteredIds: [...mastered] };
 }
 
-// 計分規則：同一個單字＋同一種測驗模式（zh/en），只有「這帳號有史以來第一次作答」
-// 會計分（答對 +1、答錯 -0.5）；之後不管是錯題本重測、還是週日整週複習又碰到同一個字，
-// 都不會重複計分。分數會持續累加，不會因為練習次數增加而被稀釋或歸零。
+const RESCORE_COOLDOWN_MS = 30 * 24 * 60 * 60 * 1000; // 跟 Code.gs 的 RESCORE_COOLDOWN_DAYS 一致
+
+// 計分規則：同一個單字＋同一種測驗模式（zh/en），真正第一次作答、或是距離上一次
+// 作答這題已經超過 30 天，才會計分（答對 +1、答錯 -0.5）——讓學生一個月後回頭複習
+// 舊字仍然能得分，對抗學習曲線下滑，但同一題不能無限刷分數。分數會持續累加，
+// 不會因為練習次數增加而被稀釋或歸零。
 function demoSubmitAnswer({ word, mode, correct }) {
   const s = demoLoadStore();
   if (typeof s.score !== "number") s.score = 0;
 
-  const firstAttempt = !s.history.some(h => h.wordId === word.id && h.mode === mode);
+  const priorAttempts = s.history.filter(h => h.wordId === word.id && h.mode === mode);
+  const lastAttempt = priorAttempts.length ? priorAttempts[priorAttempts.length - 1] : null;
+  const firstAttempt = !lastAttempt ||
+    (Date.now() - new Date(lastAttempt.time).getTime()) >= RESCORE_COOLDOWN_MS;
   const delta = firstAttempt ? (correct ? 1 : -0.5) : 0;
   s.score += delta;
 
@@ -309,6 +315,7 @@ async function renderHome() {
   const prog = await apiGetProgress();
   state.masteredIds = new Set(prog.masteredIds || []);
 
+  state.courseProgress = computeCourseProgress();
   state.viewWeekIndex = a.weekIndex; // 每次回首頁都重設回「目前實際那一週」
   renderPaceBanner();
   renderWeekPanel();
@@ -354,27 +361,55 @@ function isRangeMastered(start, end) {
   return true;
 }
 
+// 課程從第 0 週第 1 天算起、累計到第 weekIndex 週第 day 天，是第幾天
+// （週日複習跟週六用同一個序號——複習的是同一批字，不算「之後」的新進度）
+function daySeq(weekIndex, day) {
+  return weekIndex * 6 + Math.min(day, 6);
+}
+
 // ------------------------------------------------------------------------
-// 進度提示：只看「目前實際那一週」，比對「已經過去的天數裡有沒有全部完成」
-// 跟「還沒到的天數裡有沒有已經先完成」，落後就提醒、超前就鼓勵
+// 課程進度總表：從課程第一天掃到「今天」，看有沒有全部完成（caughtUp，決定
+// 能不能點開「今天之後」的進度）、還有幾天沒完成（missedDays，催促用）。
+// 「之後」的進度一定要先把之前跟今天的都完成才能點開，回頭補之前的天數則
+// 永遠不鎖。
+// ------------------------------------------------------------------------
+function computeCourseProgress() {
+  const a = state.assignment;
+  const todayDay = a.weekday === 7 ? 6 : a.weekday;
+  let missedDays = 0;
+  for (let wi = 0; wi <= a.weekIndex; wi++) {
+    const lastDay = wi < a.weekIndex ? 6 : todayDay;
+    for (let day = 1; day <= lastDay; day++) {
+      const { start, end } = dayRangeFor(wi, day);
+      if (start > a.wordBankMax) continue;
+      if (!isRangeMastered(start, end)) missedDays++;
+    }
+  }
+  return { caughtUp: missedDays === 0, missedDays, todaySeq: daySeq(a.weekIndex, todayDay) };
+}
+
+// ------------------------------------------------------------------------
+// 進度提示：還沒把「之前＋今天」的進度全部完成就催促（不限本週，整個課程累計）；
+// 已經全部完成、還把本週後面的天數提前做完了，就鼓勵
 // ------------------------------------------------------------------------
 function renderPaceBanner() {
   const a = state.assignment;
-  let missedDays = 0, aheadDays = 0;
-  for (let day = 1; day <= 6; day++) {
-    const { start, end } = dayRangeFor(a.weekIndex, day);
-    if (start > a.wordBankMax) continue;
-    const done = isRangeMastered(start, end);
-    const isPastDue = a.weekday === 7 || day < a.weekday; // 已經過去、理論上該完成的天
-    const isFuture = !isPastDue && day !== a.weekday;      // 還沒到、算超前
-    if (isPastDue && !done) missedDays++;
-    if (isFuture && done) aheadDays++;
+  const { missedDays } = state.courseProgress;
+  let aheadDays = 0;
+  if (state.courseProgress.caughtUp) {
+    for (let day = 1; day <= 6; day++) {
+      const isFuture = a.weekday !== 7 && day > a.weekday;
+      if (!isFuture) continue;
+      const { start, end } = dayRangeFor(a.weekIndex, day);
+      if (start > a.wordBankMax) continue;
+      if (isRangeMastered(start, end)) aheadDays++;
+    }
   }
 
   const banner = document.getElementById("paceBanner");
   if (missedDays > 0) {
     banner.className = "pace-banner warn";
-    banner.textContent = `⏰ 本週還有 ${missedDays} 天的進度沒完成，記得找時間補回來！`;
+    banner.textContent = `⏰ 目前還有 ${missedDays} 天的進度沒完成，要先補完之前跟今天的進度，才能解鎖之後的內容，加油！`;
   } else if (aheadDays > 0) {
     banner.className = "pace-banner success";
     banner.textContent = `🎉 太棒了！已經超前完成本週 ${aheadDays} 天的進度！`;
@@ -402,6 +437,9 @@ function renderWeekPanel() {
   document.getElementById("weekPrevBtn").disabled = wi <= 0;
   document.getElementById("weekNextBtn").disabled = weekRangeFor(wi + 1).start > a.wordBankMax;
 
+  const todaySeq = state.courseProgress.todaySeq;
+  const caughtUp = state.courseProgress.caughtUp;
+
   const list = document.getElementById("weekDaysList");
   const items = [];
   for (let day = 1; day <= 6; day++) {
@@ -410,15 +448,35 @@ function renderWeekPanel() {
     const isToday = rel === 0 && a.weekday === day;
     const done = !empty && isRangeMastered(start, end);
     const isPastDue = rel < 0 || (rel === 0 && (a.weekday === 7 || day < a.weekday));
+    const locked = !empty && daySeq(wi, day) > todaySeq && !caughtUp;
     let tag = "";
-    if (done) tag = '<span class="week-day-tag done">✓ 已完成</span>';
+    if (locked) tag = '<span class="week-day-tag locked">🔒 未開放</span>';
+    else if (done) tag = '<span class="week-day-tag done">✓ 已完成</span>';
     else if (isToday) tag = '<span class="week-day-tag today">今天</span>';
     else if (isPastDue) tag = '<span class="week-day-tag pending">尚未完成</span>';
     items.push(`
-      <li class="week-day-item${isToday ? " is-today" : ""}${done ? " is-done" : ""}${empty ? " is-empty" : ""}" data-week="${wi}" data-day="${day}">
+      <li class="week-day-item${isToday ? " is-today" : ""}${done ? " is-done" : ""}${(empty || locked) ? " is-locked" : ""}" data-week="${wi}" data-day="${day}">
         <span class="week-day-label">${DAY_NAMES[day]}</span>
         <span class="week-day-range">${empty ? "超出題庫範圍" : `題號 ${start}~${end}`}</span>
         ${tag}
+      </li>`);
+  }
+
+  // 週日：這週全部混合再刷一次，跟週六用同一個解鎖時機（複習同一批字，不算新進度）
+  {
+    const sunEmpty = weekStart > a.wordBankMax;
+    const sunDone = !sunEmpty && isRangeMastered(weekStart, weekEnd);
+    const sunToday = rel === 0 && a.weekday === 7;
+    const sunLocked = !sunEmpty && daySeq(wi, 6) > todaySeq && !caughtUp;
+    let sunTag = "";
+    if (sunLocked) sunTag = '<span class="week-day-tag locked">🔒 未開放</span>';
+    else if (sunDone) sunTag = '<span class="week-day-tag done">✓ 已完成</span>';
+    else if (sunToday) sunTag = '<span class="week-day-tag today">今天</span>';
+    items.push(`
+      <li class="week-day-item week-day-sunday${sunToday ? " is-today" : ""}${sunDone ? " is-done" : ""}${(sunEmpty || sunLocked) ? " is-locked" : ""}" data-week="${wi}" data-day="7">
+        <span class="week-day-label">週日</span>
+        <span class="week-day-range">${sunEmpty ? "超出題庫範圍" : `本週混合複習 題號 ${weekStart}~${weekEnd}`}</span>
+        ${sunTag}
       </li>`);
   }
   list.innerHTML = items.join("");
@@ -437,12 +495,12 @@ document.getElementById("weekNextBtn").addEventListener("click", () => {
 
 document.getElementById("weekDaysList").addEventListener("click", (e) => {
   const li = e.target.closest(".week-day-item");
-  if (!li || li.classList.contains("is-empty")) return;
+  if (!li || li.classList.contains("is-locked")) return;
   startDayStudy(Number(li.dataset.week), Number(li.dataset.day));
 });
 
 function startDayStudy(weekIndex, day) {
-  const { start, end } = dayRangeFor(weekIndex, day);
+  const { start, end } = day === 7 ? weekRangeFor(weekIndex) : dayRangeFor(weekIndex, day);
   const words = wordsInRange(start, end);
   if (!words.length) return;
   state.studyWords = words;
@@ -450,7 +508,8 @@ function startDayStudy(weekIndex, day) {
   state.studyFlipped = {};
   const rel = weekIndex - state.assignment.weekIndex;
   const weekLabel = rel === 0 ? "" : rel === -1 ? "上週" : rel === 1 ? "下週" : `第${weekIndex + 1}週`;
-  document.getElementById("studyTitle").textContent = `${weekLabel}${DAY_NAMES[day]}單字`;
+  const dayLabel = day === 7 ? "週日混合複習" : `${DAY_NAMES[day]}單字`;
+  document.getElementById("studyTitle").textContent = `${weekLabel}${dayLabel}`;
   renderStudyDots();
   renderStudyCard();
   showView("view-study");
