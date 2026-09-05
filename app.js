@@ -108,16 +108,20 @@ const RESCORE_COOLDOWN_MS = 30 * 24 * 60 * 60 * 1000; // 跟 Code.gs 的 RESCORE
 // 計分規則：同一個單字＋同一種測驗模式（zh/en），真正第一次作答、或是距離上一次
 // 作答這題已經超過 30 天，才會計分（答對 +1、答錯 -0.5）——讓學生一個月後回頭複習
 // 舊字仍然能得分，對抗學習曲線下滑，但同一題不能無限刷分數。分數會持續累加，
-// 不會因為練習次數增加而被稀釋或歸零。
-function demoSubmitAnswer({ word, mode, correct }) {
+// 不會因為練習次數增加而被稀釋或歸零。skipScore 一律不計分（週日錯題複習用）。
+function demoSubmitAnswer({ word, mode, correct, skipScore }) {
   const s = demoLoadStore();
   if (typeof s.score !== "number") s.score = 0;
 
-  const priorAttempts = s.history.filter(h => h.wordId === word.id && h.mode === mode);
-  const lastAttempt = priorAttempts.length ? priorAttempts[priorAttempts.length - 1] : null;
-  const firstAttempt = !lastAttempt ||
-    (Date.now() - new Date(lastAttempt.time).getTime()) >= RESCORE_COOLDOWN_MS;
-  const delta = firstAttempt ? (correct ? 1 : -0.5) : 0;
+  let firstAttempt = false;
+  let delta = 0;
+  if (!skipScore) {
+    const priorAttempts = s.history.filter(h => h.wordId === word.id && h.mode === mode);
+    const lastAttempt = priorAttempts.length ? priorAttempts[priorAttempts.length - 1] : null;
+    firstAttempt = !lastAttempt ||
+      (Date.now() - new Date(lastAttempt.time).getTime()) >= RESCORE_COOLDOWN_MS;
+    delta = firstAttempt ? (correct ? 1 : -0.5) : 0;
+  }
   s.score += delta;
 
   s.history.push({
@@ -170,11 +174,11 @@ async function apiGetAssignment(account) {
   return callApi("getAssignment", { account });
 }
 
-async function apiSubmitAnswer({ word, mode, correct }) {
-  if (!APPS_SCRIPT_URL) return demoSubmitAnswer({ word, mode, correct });
+async function apiSubmitAnswer({ word, mode, correct, skipScore }) {
+  if (!APPS_SCRIPT_URL) return demoSubmitAnswer({ word, mode, correct, skipScore });
   return callApi("submitAnswer", {
     account: state.user, wordId: word.id, en: word.en, zh: word.zh,
-    mode, given: state.lastGiven || "", correct,
+    mode, given: state.lastGiven || "", correct, skipScore: !!skipScore,
   });
 }
 
@@ -215,7 +219,7 @@ const state = {
   quizIndex: 0,
   quizAnswers: [],
   pendingQuizWords: [],
-  quizSource: "daily",     // "daily" | "week" | "wrong"
+  quizSource: "daily",     // "daily" | "wrong" | "sunday"（sunday＝週日錯題複習，不計分）
 };
 
 function findWord(id) { return WORD_BANK_FULL.find(w => w.id === id); }
@@ -296,25 +300,35 @@ async function renderHome() {
   document.getElementById("assignRange").textContent = `第 ${a.weekStart}~${a.weekEnd} 題`;
   updateTopbarScore(a.score || 0);
 
+  const wb = await apiGetWrongBank();
+  state.wrongBank = wb.items || [];
+  document.getElementById("wrongCount").textContent = `目前 ${state.wrongBank.length} 題待複習`;
+
   const todayDateStr = dateForDay(a.weekIndex, a.weekday);
   const sundayHint = document.getElementById("sundayHint");
+  const actionSubEl = document.querySelector("#goQuizBtn .action-sub");
   if (a.weekday === 7) {
-    document.getElementById("todayTag").textContent = `${todayDateStr} · 本週總複習`;
-    document.getElementById("todayRange").textContent = `題號 ${a.weekStart}~${a.weekEnd}（全部混合）`;
-    document.getElementById("todayHeading").textContent = "今天把這週的單字全部混合再看一次";
-    document.getElementById("goStudyBtn").textContent = "看本週單字";
-    sundayHint.textContent = "今天測驗會從整週題目隨機出題";
+    const sunItems = weekWrongItems(a.weekIndex);
+    document.getElementById("todayTag").textContent = `${todayDateStr} · 本週錯題複習`;
+    document.getElementById("todayRange").textContent = sunItems.length
+      ? `回收本週 ${sunItems.length} 題答錯的題目`
+      : "這週沒有錯題，太棒了！";
+    document.getElementById("todayHeading").textContent = sunItems.length
+      ? "把這週答錯的題目複習到全部答對，才能解鎖下週進度"
+      : "這週全部都答對了，可以先休息，或提前準備下週進度";
+    document.getElementById("goStudyBtn").textContent = sunItems.length ? "開始複習錯題" : "沒有錯題可複習";
+    document.getElementById("goStudyBtn").disabled = !sunItems.length;
+    if (actionSubEl) actionSubEl.textContent = "本週錯題複習";
+    sundayHint.textContent = "週日複習不計分，但要練到全對才能繼續下一週";
   } else {
     document.getElementById("todayTag").textContent = `${todayDateStr} · ${DAY_NAMES[a.weekday]} · 每日十字`;
     document.getElementById("todayRange").textContent = `題號 ${a.todayStart}~${a.todayEnd}`;
     document.getElementById("todayHeading").textContent = "先看過今天的十個單字，背熟再測驗";
     document.getElementById("goStudyBtn").textContent = "看今日單字";
+    document.getElementById("goStudyBtn").disabled = false;
+    if (actionSubEl) actionSubEl.textContent = "中文卷／英文卷";
     sundayHint.textContent = "";
   }
-
-  const wb = await apiGetWrongBank();
-  state.wrongBank = wb.items || [];
-  document.getElementById("wrongCount").textContent = `目前 ${state.wrongBank.length} 題待複習`;
 
   const prog = await apiGetProgress();
   state.masteredIds = new Set(prog.masteredIds || []);
@@ -356,6 +370,12 @@ function wordsInRange(start, end) {
   return WORD_BANK_FULL.filter(w => w.id >= start && w.id <= end);
 }
 
+// 第 weekIndex 週目前錯題本裡，屬於這一週題號範圍的項目（週日複習的內容來源）
+function weekWrongItems(weekIndex) {
+  const { start, end } = weekRangeFor(weekIndex);
+  return state.wrongBank.filter(w => w.wordId >= start && w.wordId <= end);
+}
+
 // 第 weekIndex 週、第 day 天（1~6=週一~週六，7=週日）對應的實際日曆日期
 // （開課週一日期 + 過了幾週 + 星期幾），格式化成「9/1（一）」方便老師/學生對照
 function dateForDay(weekIndex, day) {
@@ -392,6 +412,7 @@ function computeCourseProgress() {
   const a = state.assignment;
   const todayDay = a.weekday === 7 ? 6 : a.weekday;
   let missedDays = 0;
+  let missedSundays = 0;
   for (let wi = 0; wi <= a.weekIndex; wi++) {
     const lastDay = wi < a.weekIndex ? 6 : todayDay;
     for (let day = 1; day <= lastDay; day++) {
@@ -399,17 +420,28 @@ function computeCourseProgress() {
       if (start > a.wordBankMax) continue;
       if (!isRangeMastered(start, end)) missedDays++;
     }
+    // 已經整個結束的週（不含目前這一週），週日錯題要清空才能解鎖下一週；
+    // 目前這一週還沒輪到，不用先擋（同一週裡沒有比週日更後面的內容要擋）
+    if (wi < a.weekIndex) {
+      const { start: wkStart } = weekRangeFor(wi);
+      if (wkStart <= a.wordBankMax && weekWrongItems(wi).length > 0) missedSundays++;
+    }
   }
-  return { caughtUp: missedDays === 0, missedDays, todaySeq: daySeq(a.weekIndex, todayDay) };
+  return {
+    caughtUp: missedDays === 0 && missedSundays === 0,
+    missedDays, missedSundays,
+    todaySeq: daySeq(a.weekIndex, todayDay),
+  };
 }
 
 // ------------------------------------------------------------------------
-// 進度提示：還沒把「之前＋今天」的進度全部完成就催促（不限本週，整個課程累計）；
-// 已經全部完成、還把本週後面的天數提前做完了，就鼓勵
+// 進度提示：還沒把「之前＋今天」的每日進度、或前面幾週的週日錯題複習全部完成
+// 就催促（不限本週，整個課程累計）；已經全部完成、還把本週後面的天數提前做完
+// 了，就鼓勵
 // ------------------------------------------------------------------------
 function renderPaceBanner() {
   const a = state.assignment;
-  const { missedDays } = state.courseProgress;
+  const { missedDays, missedSundays } = state.courseProgress;
   let aheadDays = 0;
   if (state.courseProgress.caughtUp) {
     for (let day = 1; day <= 6; day++) {
@@ -422,9 +454,12 @@ function renderPaceBanner() {
   }
 
   const banner = document.getElementById("paceBanner");
-  if (missedDays > 0) {
+  if (missedDays > 0 || missedSundays > 0) {
+    const parts = [];
+    if (missedDays > 0) parts.push(`${missedDays} 天的每日進度`);
+    if (missedSundays > 0) parts.push(`${missedSundays} 週的週日錯題複習`);
     banner.className = "pace-banner warn";
-    banner.textContent = `⏰ 目前還有 ${missedDays} 天的進度沒完成，要先補完之前跟今天的進度，才能解鎖之後的內容，加油！`;
+    banner.textContent = `⏰ 目前還有${parts.join("、")}沒完成，要先補完才能解鎖之後的內容，加油！`;
   } else if (aheadDays > 0) {
     banner.className = "pace-banner success";
     banner.textContent = `🎉 太棒了！已經超前完成本週 ${aheadDays} 天的進度！`;
@@ -478,20 +513,26 @@ function renderWeekPanel() {
       </li>`);
   }
 
-  // 週日：這週全部混合再刷一次，跟週六用同一個解鎖時機（複習同一批字，不算新進度）
+  // 週日：回收這一週答錯還沒訂正的題目重新複習，不計分，但要練到全對才算完成，
+  // 沒完成就會擋住下一週的解鎖（跟週六用同一個解鎖時機，複習同一批字，不算新進度）
   {
     const sunEmpty = weekStart > a.wordBankMax;
-    const sunDone = !sunEmpty && isRangeMastered(weekStart, weekEnd);
+    const sunWrongItems = sunEmpty ? [] : weekWrongItems(wi);
+    const sunDone = !sunEmpty && sunWrongItems.length === 0;
     const sunToday = rel === 0 && a.weekday === 7;
     const sunLocked = !sunEmpty && daySeq(wi, 6) > todaySeq && !caughtUp;
     let sunTag = "";
     if (sunLocked) sunTag = '<span class="week-day-tag locked">🔒 未開放</span>';
     else if (sunDone) sunTag = '<span class="week-day-tag done">✓ 已完成</span>';
     else if (sunToday) sunTag = '<span class="week-day-tag today">今天</span>';
+    const sunRangeText = sunEmpty ? "超出題庫範圍"
+      : sunWrongItems.length > 0
+        ? `<b class="week-day-date">${dateForDay(wi, 7)}</b> · 回收本週 ${sunWrongItems.length} 題錯題複習（不計分）`
+        : `<b class="week-day-date">${dateForDay(wi, 7)}</b> · 本週沒有錯題，太棒了！`;
     items.push(`
       <li class="week-day-item week-day-sunday${sunToday ? " is-today" : ""}${sunDone ? " is-done" : ""}${(sunEmpty || sunLocked) ? " is-locked" : ""}" data-week="${wi}" data-day="7">
         <span class="week-day-label">週日</span>
-        <span class="week-day-range">${sunEmpty ? "超出題庫範圍" : `<b class="week-day-date">${dateForDay(wi, 7)}</b> · 本週混合複習 題號 ${weekStart}~${weekEnd}`}</span>
+        <span class="week-day-range">${sunRangeText}</span>
         ${sunTag}
       </li>`);
   }
@@ -512,11 +553,14 @@ document.getElementById("weekNextBtn").addEventListener("click", () => {
 document.getElementById("weekDaysList").addEventListener("click", (e) => {
   const li = e.target.closest(".week-day-item");
   if (!li || li.classList.contains("is-locked")) return;
-  startDayStudy(Number(li.dataset.week), Number(li.dataset.day));
+  const weekIndex = Number(li.dataset.week);
+  const day = Number(li.dataset.day);
+  if (day === 7) startSundayReview(weekIndex);
+  else startDayStudy(weekIndex, day);
 });
 
 function startDayStudy(weekIndex, day) {
-  const { start, end } = day === 7 ? weekRangeFor(weekIndex) : dayRangeFor(weekIndex, day);
+  const { start, end } = dayRangeFor(weekIndex, day);
   const words = wordsInRange(start, end);
   if (!words.length) return;
   state.studyWords = words;
@@ -524,11 +568,23 @@ function startDayStudy(weekIndex, day) {
   state.studyFlipped = {};
   const rel = weekIndex - state.assignment.weekIndex;
   const weekLabel = rel === 0 ? "" : rel === -1 ? "上週" : rel === 1 ? "下週" : `第${weekIndex + 1}週`;
-  const dayLabel = day === 7 ? "週日混合複習" : `${DAY_NAMES[day]}單字`;
-  document.getElementById("studyTitle").textContent = `${weekLabel}${dayLabel}`;
+  document.getElementById("studyTitle").textContent = `${weekLabel}${DAY_NAMES[day]}單字`;
   renderStudyDots();
   renderStudyCard();
   showView("view-study");
+}
+
+// 週日任務：直接把這一週目前還在錯題本裡的題目拿出來複習（不經過單字卡背誦），
+// 用各自原本答錯的模式出題、不計分，練到全對才算完成
+function startSundayReview(weekIndex) {
+  const items = weekWrongItems(weekIndex);
+  if (!items.length) return; // 這週沒有錯題可複習，任務已經算完成了
+  state.quizSource = "sunday";
+  state.quizMode = null;
+  state.pendingQuizWords = items
+    .map(w => ({ word: findWord(w.wordId), mode: w.mode }))
+    .filter(item => item.word);
+  startQuiz();
 }
 
 // 雛形示範控制列：只影響本機示範模式（APPS_SCRIPT_URL 未設定時）
@@ -553,10 +609,14 @@ function currentStudyWords() {
 }
 
 document.getElementById("goStudyBtn").addEventListener("click", () => {
-  state.studyWords = state.assignment.weekday === 7 ? state.assignment.weekWords : state.assignment.todayWords;
+  if (state.assignment.weekday === 7) {
+    startSundayReview(state.assignment.weekIndex);
+    return;
+  }
+  state.studyWords = state.assignment.todayWords;
   state.studyIndex = 0;
   state.studyFlipped = {};
-  document.getElementById("studyTitle").textContent = state.assignment.weekday === 7 ? "本週單字總覽" : "今日單字";
+  document.getElementById("studyTitle").textContent = "今日單字";
   renderStudyDots();
   renderStudyCard();
   showView("view-study");
@@ -621,9 +681,11 @@ function openQuizPick(words, source) {
   showView("view-quizpick");
 }
 document.getElementById("goQuizBtn").addEventListener("click", () => {
-  const source = state.assignment.weekday === 7 ? "week" : "daily";
-  const words = source === "week" ? state.assignment.weekWords : state.assignment.todayWords;
-  openQuizPick(words, source);
+  if (state.assignment.weekday === 7) {
+    startSundayReview(state.assignment.weekIndex);
+    return;
+  }
+  openQuizPick(state.assignment.todayWords, "daily");
 });
 document.getElementById("retestWrongBtn").addEventListener("click", () => openQuizPick([], "wrong"));
 
@@ -644,7 +706,9 @@ function startQuiz() {
   state.quizAnswers = [];
   setQuizBusy(false);
   document.getElementById("quizTitle").textContent =
-    state.quizSource === "wrong" ? "錯題重測" : (state.quizMode === "zh" ? "中文卷" : "英文卷");
+    state.quizSource === "wrong" ? "錯題重測"
+      : state.quizSource === "sunday" ? "週日錯題複習"
+        : (state.quizMode === "zh" ? "中文卷" : "英文卷");
   renderQuizDots();
   renderQuizQuestion();
   showView("view-quiz");
@@ -720,7 +784,8 @@ async function submitQuizAnswer() {
   const given = input.value.trim();
   const correct = checkAnswer(w, mode, given);
   state.lastGiven = given;
-  const scoreResult = await apiSubmitAnswer({ word: w, mode, correct });
+  const skipScore = state.quizSource === "sunday"; // 週日錯題複習一律不計分
+  const scoreResult = await apiSubmitAnswer({ word: w, mode, correct, skipScore });
   state.quizAnswers[state.quizIndex] = {
     word: w, mode, correct, given,
     scored: !!scoreResult.firstAttempt, delta: scoreResult.delta || 0,
@@ -777,8 +842,8 @@ async function renderQuizResult() {
     const pointTag = a.scored
       ? `<span class="point-tag earned">${a.delta > 0 ? "+" : ""}${formatScore(a.delta)} 分</span>`
       : `<span class="point-tag">不計分</span>`;
-    // 錯題重測是混合中文卷／英文卷出題，額外標示這題當時考的是哪一種
-    const modeTag = state.quizSource === "wrong"
+    // 錯題重測／週日複習是混合中文卷／英文卷出題，額外標示這題當時考的是哪一種
+    const modeTag = (state.quizSource === "wrong" || state.quizSource === "sunday")
       ? `<span class="point-tag">${a.mode === "zh" ? "中文卷" : "英文卷"}</span>`
       : "";
     return `

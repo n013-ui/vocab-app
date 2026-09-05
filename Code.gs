@@ -226,22 +226,29 @@ function handleGetAssignment({ account }) {
 const MODE_LABEL = { zh: "中文卷", en: "英文卷" };
 const RESCORE_COOLDOWN_DAYS = 30; // 同一題隔多久重刷才能再拿分（避免無限刷分數）
 
-function handleSubmitAnswer({ account, wordId, en, zh, mode, given, correct }) {
+function handleSubmitAnswer({ account, wordId, en, zh, mode, given, correct, skipScore }) {
   const modeLabel = MODE_LABEL[mode] || mode;
   const isCorrect = !!correct;
   const now = new Date();
-  const scoringEligible = isScoringEligible_(account, wordId, modeLabel, now);
 
   const logSheet = getSheet_(SHEET_LOG);
   logSheet.appendRow([now, account, wordId, en, zh, modeLabel, given || "", isCorrect]);
 
+  // 錯題本回收不受計分規則影響：不管算不算分，答錯一律照樣記錄、答對一律照樣移除
+  // （週日錯題複習就是靠這個把本週答錯的題目清空，才能解鎖下一週）
   updateWrongBank_({ account, wordId, en, zh, mode, correct: isCorrect });
 
   let delta = 0;
   let newScore = null;
-  if (scoringEligible) {
-    delta = isCorrect ? 1 : -0.5;
-    newScore = addStudentScore_(account, delta);
+  let scoringEligible = false;
+  if (!skipScore) {
+    // skipScore＝true 時（例如週日錯題複習）完全不計分，連「算不算第一次」都不用判斷，
+    // 也不會影響之後真正計分那次的冷卻時間判斷基準（因為時間戳記還是照樣寫進作答紀錄）
+    scoringEligible = isScoringEligible_(account, wordId, modeLabel, now);
+    if (scoringEligible) {
+      delta = isCorrect ? 1 : -0.5;
+      newScore = addStudentScore_(account, delta);
+    }
   }
 
   // API 欄位名稱維持 firstAttempt（前端沿用），但意義已經不只是「有史以來第一次」，
