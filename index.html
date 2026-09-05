@@ -57,7 +57,10 @@
     </div>
     <div class="topbar-right">
       <p class="topbar-score" id="topbarScore">累計 0 分</p>
-      <button id="logoutBtn" class="btn btn-ghost">登出</button>
+      <div class="topbar-btn-row">
+        <button id="rulesBtn" class="btn btn-ghost">📖 規則</button>
+        <button id="logoutBtn" class="btn btn-ghost">登出</button>
+      </div>
     </div>
   </header>
 
@@ -183,6 +186,48 @@
       </div>
       <ul class="wrong-list" id="wrongList"></ul>
       <button class="btn btn-primary btn-lg btn-block" id="retestWrongBtn">重新測驗錯題</button>
+    </section>
+
+    <!-- 規則說明 -->
+    <section id="view-rules" class="view">
+      <div class="view-head">
+        <button class="btn btn-text" data-back>← 返回</button>
+        <p class="view-title">規則說明</p>
+      </div>
+
+      <div class="rules-block">
+        <h3>📅 每日進度</h3>
+        <ul>
+          <li>每天有 10 個新單字要背、要考。</li>
+          <li>要先把「之前」跟「今天」的進度都完成，才會解鎖後面的天數——不能無限超前跳著做。</li>
+          <li>回頭補之前沒做完的進度沒有限制，隨時都可以點進去補。</li>
+          <li>一個字只要中文卷或英文卷其中一種答對過，這個字就算過關；一天十個字全部過關，這一天就算「已完成」。</li>
+        </ul>
+      </div>
+
+      <div class="rules-block">
+        <h3>✏️ 測驗與計分</h3>
+        <ul>
+          <li>答對一題 <b class="rules-plus">+1</b> 分，答錯一題 <b class="rules-minus">-0.5</b> 分。</li>
+          <li>答錯的題目會自動收進「錯題本」，累計錯誤次數；重新測驗答對後會自動移除。</li>
+          <li>想完成當天任務，要把當天答錯的題目複習到全部答對為止。</li>
+        </ul>
+      </div>
+
+      <div class="rules-block">
+        <h3>🔁 重刷複習（避免忘記、對抗學習曲線下滑）</h3>
+        <ul>
+          <li>每個字「有史以來第一次」作答才會正式計分；之後不管是錯題本重測、還是週日整週複習又碰到同一個字，都不會重複加分或扣分。</li>
+          <li><b>特殊設計</b>：如果隔了 30 天以上才回頭重新練習同一個字，會被當成「重新計分」的機會——答對一樣 +1、答錯一樣 -0.5，讓你回頭複習舊字時仍然能拿到分數，鼓勵自己主動回頭複習，避免忘記了卻不想再碰。</li>
+        </ul>
+      </div>
+
+      <div class="rules-block">
+        <h3>🗓️ 週日複習</h3>
+        <ul>
+          <li>每一週都可以點「週日」把這一週全部 60 個字混在一起重新練習一次，不限制只有星期天當天才能做。</li>
+        </ul>
+      </div>
     </section>
 
   </main>

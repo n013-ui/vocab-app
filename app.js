@@ -285,6 +285,8 @@ document.getElementById("logoutBtn").addEventListener("click", () => {
   document.getElementById("screen-login").classList.add("active");
 });
 
+document.getElementById("rulesBtn").addEventListener("click", () => showView("view-rules"));
+
 // ------------------------------------------------------------------------
 // 首頁
 // ------------------------------------------------------------------------
@@ -580,8 +582,9 @@ function renderStudyCard() {
   document.getElementById("prevCardBtn").disabled = state.studyIndex === 0;
   const isLast = state.studyIndex === words.length - 1;
   document.getElementById("nextCardBtn").textContent = isLast ? "完成" : "下一個";
-  document.getElementById("studyDoneBtn").classList.toggle("hidden",
-    !Object.keys(state.studyFlipped).length || !isLast);
+  // 隨時都能直接跳去測驗，不用一定要翻完全部卡片才能離開
+  document.getElementById("studyDoneBtn").classList.remove("hidden");
+  document.getElementById("studyDoneBtn").textContent = isLast ? "背完了，去測驗" : "直接去測驗";
 }
 
 document.getElementById("flashcard").addEventListener("click", () => {

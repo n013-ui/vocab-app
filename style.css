@@ -115,6 +115,8 @@ body{
   margin:0; font-weight:800; font-size:13px; color:var(--gold);
   background:#FBF1DE; border-radius:10px; padding:4px 10px; white-space:nowrap;
 }
+.topbar-btn-row{display:flex; gap:6px;}
+.topbar-btn-row .btn{padding:8px 10px; font-size:12.5px; white-space:nowrap;}
 
 main#views{padding:4px 20px 50px;}
 .view{display:none;}
@@ -259,6 +261,17 @@ main#views{padding:4px 20px 50px;}
 .wrong-en{font-family:var(--serif); font-style:italic; font-weight:600; font-size:16px;}
 .wrong-zh{color:var(--ink-soft); font-size:13.5px;}
 .wrong-count{font-size:11.5px; background:var(--danger-bg); color:var(--danger); border-radius:8px; padding:3px 8px; font-weight:700;}
+
+/* ---------- 規則說明 ---------- */
+.rules-block{
+  background:var(--card); border:1.5px solid var(--border); border-radius:16px;
+  padding:16px 18px; margin-bottom:14px;
+}
+.rules-block h3{font-size:14.5px; font-weight:900; margin:0 0 10px;}
+.rules-block ul{margin:0; padding-left:18px; display:flex; flex-direction:column; gap:8px;}
+.rules-block li{font-size:13.5px; line-height:1.6; color:var(--ink);}
+.rules-plus{color:var(--success);}
+.rules-minus{color:var(--danger);}
 
 /* ---------- 平板 / 大螢幕稍微放寬呼吸感 ---------- */
 @media (min-width:600px){
