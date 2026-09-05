@@ -135,16 +135,34 @@ function getStudentConfig_(account) {
   };
 }
 
+// 把「日期」或「YYYY-MM-DD 文字」統一轉成「只看年月日」的 Date（時分秒歸零）。
+// 這樣不管 Sheet 儲存格是真正的日期型態、還是打字打出來的文字，兩個帳號只要
+// 年月日相同，算出來的結果就一定相同，不會因為日期型態不同、內部時間差幾小時，
+// 剛好跨過午夜而被算成不同一天、抓到不同範圍的題目。
+function toDateOnly_(value) {
+  let y, m, d;
+  if (value instanceof Date) {
+    const tz = Session.getScriptTimeZone();
+    y = Number(Utilities.formatDate(value, tz, "yyyy"));
+    m = Number(Utilities.formatDate(value, tz, "MM"));
+    d = Number(Utilities.formatDate(value, tz, "dd"));
+  } else {
+    const match = String(value).trim().match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
+    if (!match) return null;
+    y = Number(match[1]); m = Number(match[2]); d = Number(match[3]);
+  }
+  return new Date(y, m - 1, d);
+}
+
 function computeAssignment_(config, now) {
-  const start = (config.programStartMonday instanceof Date)
-    ? config.programStartMonday
-    : new Date(config.programStartMonday);
-  if (isNaN(start.getTime())) {
+  const start = toDateOnly_(config.programStartMonday);
+  if (!start) {
     throw new Error("「學生」工作表的「開課週一日期」讀不到有效日期，目前讀到的值是：" +
       JSON.stringify(config.programStartMonday) + "。請確認欄位標題完全是「開課週一日期」，" +
       "且該學生列的值是日期格式（YYYY-MM-DD）。");
   }
-  const daysSince = Math.floor((now - start) / (1000 * 60 * 60 * 24));
+  const today = toDateOnly_(now);
+  const daysSince = Math.round((today - start) / (1000 * 60 * 60 * 24));
   const weekIndex = Math.max(0, Math.floor(daysSince / 7));
   const weekCount = config.dailyCount * 6;
   const weekStart = config.programStartNum + weekIndex * weekCount;
