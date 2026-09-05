@@ -105,18 +105,25 @@ function demoGetProgress() {
 const RESCORE_COOLDOWN_MS = 30 * 24 * 60 * 60 * 1000; // 跟 Code.gs 的 RESCORE_COOLDOWN_DAYS 一致
 
 // 計分規則：同一個單字＋同一種測驗模式（zh/en），真正第一次作答、或是距離上一次
-// 作答這題已經超過 30 天，才會計分（答對 +1、答錯 -0.5）——讓學生一個月後回頭複習
-// 舊字仍然能得分，對抗學習曲線下滑，但同一題不能無限刷分數。分數會持續累加，
-// 不會因為練習次數增加而被稀釋或歸零。
+// 作答這題已經超過 30 天，才會計分：答對 +1；答錯的話，只有「有史以來第一次」
+// 才扣 0.5 分，隔了 30 天以上回頭重刷答錯不扣分（避免嚇跑回來複習舊字的學生）。
+// 這是特殊設計，讓學生一個月後回頭複習舊字仍然能得分，對抗學習曲線下滑，
+// 但同一題不能無限刷分數。分數會持續累加，不會因為練習次數增加而被稀釋或歸零。
 function demoSubmitAnswer({ word, mode, correct }) {
   const s = demoLoadStore();
   if (typeof s.score !== "number") s.score = 0;
 
   const priorAttempts = s.history.filter(h => h.wordId === word.id && h.mode === mode);
   const lastAttempt = priorAttempts.length ? priorAttempts[priorAttempts.length - 1] : null;
-  const firstAttempt = !lastAttempt ||
+  const isFirstEver = !lastAttempt;
+  const eligible = isFirstEver ||
     (Date.now() - new Date(lastAttempt.time).getTime()) >= RESCORE_COOLDOWN_MS;
-  const delta = firstAttempt ? (correct ? 1 : -0.5) : 0;
+  let delta = 0;
+  if (eligible) {
+    if (correct) delta = 1;
+    else if (isFirstEver) delta = -0.5; // 隔了 30 天以上回頭重刷答錯，不扣分
+  }
+  const firstAttempt = delta !== 0;
   s.score += delta;
 
   s.history.push({
