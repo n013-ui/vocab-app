@@ -216,34 +216,30 @@ function handleSubmitAnswer({ account, wordId, en, zh, mode, given, correct }) {
   const modeLabel = MODE_LABEL[mode] || mode;
   const isCorrect = !!correct;
   const now = new Date();
-  const status = getScoringStatus_(account, wordId, modeLabel, now);
+  const scoringEligible = isScoringEligible_(account, wordId, modeLabel, now);
 
   const logSheet = getSheet_(SHEET_LOG);
   logSheet.appendRow([now, account, wordId, en, zh, modeLabel, given || "", isCorrect]);
 
-  // 錯題本回收跟計不計分完全無關，不管是不是重刷、扣不扣分，答錯一律照樣記錄，
-  // 答對一律照樣從錯題本移除
   updateWrongBank_({ account, wordId, en, zh, mode, correct: isCorrect });
 
   let delta = 0;
-  if (status.eligible) {
-    if (isCorrect) delta = 1;
-    else if (status.isFirstEver) delta = -0.5; // 只有「有史以來第一次」答錯才扣分
-    // 隔了 RESCORE_COOLDOWN_DAYS 天以上回頭重刷、這次答錯：delta 維持 0，不扣分
-    // （特殊設計：避免把回頭複習舊字的學生越扣越怕，只有第一次作答需要謹慎作答）
+  let newScore = null;
+  if (scoringEligible) {
+    delta = isCorrect ? 1 : -0.5;
+    newScore = addStudentScore_(account, delta);
   }
-  const newScore = delta !== 0 ? addStudentScore_(account, delta) : null;
 
-  // API 欄位名稱維持 firstAttempt（前端沿用），意義是「這次有沒有真的影響分數」
-  return { ok: true, firstAttempt: delta !== 0, delta, newScore };
+  // API 欄位名稱維持 firstAttempt（前端沿用），但意義已經不只是「有史以來第一次」，
+  // 而是「這次算不算計分」：真正第一次作答、或是距離上一次作答這題已經超過
+  // RESCORE_COOLDOWN_DAYS 天（特殊設計：讓學生一個月後回頭複習舊字仍然能計分，
+  // 對抗學習曲線下滑；但同一題不能無限刷分數，冷卻時間內重複作答一律不計分）
+  return { ok: true, firstAttempt: scoringEligible, delta, newScore };
 }
 
-// 這次作答的計分狀態：
-// - eligible：能不能計分——真正第一次作答這題，或是距離「上一次作答這題」已經
-//   超過 RESCORE_COOLDOWN_DAYS 天（特殊設計：讓學生一個月後回頭複習舊字仍然能
-//   得分，對抗學習曲線下滑；冷卻時間內重複作答一律不計分，避免無限刷分數）
-// - isFirstEver：是不是「有史以來第一次」作答這題（只有第一次答錯才扣分，見上）
-function getScoringStatus_(account, wordId, modeLabel, now) {
+// 這次作答算不算「可以計分」：從來沒作答過這題（這個帳號＋題號＋測驗類型），
+// 或是距離「上一次作答這題」已經超過 RESCORE_COOLDOWN_DAYS 天
+function isScoringEligible_(account, wordId, modeLabel, now) {
   const { rows } = readTable_(SHEET_LOG);
   let lastAttemptTime = null;
   rows.forEach(r => {
@@ -254,9 +250,9 @@ function getScoringStatus_(account, wordId, modeLabel, now) {
     if (isNaN(t.getTime())) return;
     if (!lastAttemptTime || t > lastAttemptTime) lastAttemptTime = t;
   });
-  if (!lastAttemptTime) return { eligible: true, isFirstEver: true };
+  if (!lastAttemptTime) return true; // 從來沒作答過，真正的第一次
   const daysSince = (now - lastAttemptTime) / (1000 * 60 * 60 * 24);
-  return { eligible: daysSince >= RESCORE_COOLDOWN_DAYS, isFirstEver: false };
+  return daysSince >= RESCORE_COOLDOWN_DAYS;
 }
 
 // 把 delta 加進「學生」工作表該帳號的「累計分數」欄，回傳更新後的分數
