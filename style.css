@@ -171,6 +171,7 @@ main#views{padding:4px 20px 50px;}
 .week-day-item.week-day-sunday{border-style:dashed;}
 .week-day-label{font-weight:800; font-size:13.5px; min-width:44px;}
 .week-day-range{color:var(--ink-soft); font-size:12.5px; flex:1; margin-left:10px;}
+.week-day-date{color:var(--ink); font-weight:800;}
 .week-day-tag{font-size:11px; font-weight:700; border-radius:8px; padding:3px 8px; white-space:nowrap;}
 .week-day-tag.today{background:var(--success-bg); color:var(--success);}
 .week-day-tag.done{background:var(--success); color:#fff;}

@@ -163,8 +163,12 @@ function computeAssignment_(config, now) {
       "且該學生列的值是日期格式（YYYY-MM-DD）。");
   }
   const today = toDateOnly_(now);
-  const daysSince = Math.round((today - start) / (1000 * 60 * 60 * 24));
-  const weekIndex = Math.max(0, Math.floor(daysSince / 7));
+  // 開課日期若還沒到（例如老師把日期改到未來），daysSince 會是負數；直接夾到 0，
+  // 當作「還沒開課就先當第 1 天」，不然負數天數丟進下面的星期幾計算，算出來的
+  // 星期幾會很奇怪（尤其如果改的天數剛好是 7 的倍數，星期幾甚至會跟改之前一模一樣，
+  // 看起來就像「日期改了卻沒反應」）
+  const daysSince = Math.max(0, Math.round((today - start) / (1000 * 60 * 60 * 24)));
+  const weekIndex = Math.floor(daysSince / 7);
   const weekCount = config.dailyCount * 6;
   const weekStart = config.programStartNum + weekIndex * weekCount;
   const weekEnd = weekStart + weekCount - 1;
@@ -179,7 +183,15 @@ function computeAssignment_(config, now) {
     todayStart = weekStart + (weekday - 1) * config.dailyCount;
     todayEnd = todayStart + config.dailyCount - 1;
   }
-  return { weekIndex, weekStart, weekEnd, weekday, todayStart, todayEnd };
+  return { weekIndex, weekStart, weekEnd, weekday, todayStart, todayEnd, programMonday: start };
+}
+
+// Date 轉成 YYYY-MM-DD 文字（給前端算每天的實際日期用）
+function formatDateOnly_(date) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
 }
 
 function handleGetAssignment({ account }) {
@@ -203,6 +215,8 @@ function handleGetAssignment({ account }) {
     dailyCount: config.dailyCount,
     programStartNum: config.programStartNum,
     wordBankMax: maxId,
+    // 開課週一的實際日期（YYYY-MM-DD），給前端算每天/每週對應的實際日期用
+    programMonday: formatDateOnly_(a.programMonday),
   };
 }
 

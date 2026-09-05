@@ -90,6 +90,7 @@ function demoGetAssignment() {
     dailyCount: DAILY_COUNT,
     programStartNum: 1,
     wordBankMax: WORD_BANK_FULL.length,
+    programMonday: state.demoProgramMonday,
   };
 }
 
@@ -293,15 +294,16 @@ async function renderHome() {
   document.getElementById("assignRange").textContent = `第 ${a.weekStart}~${a.weekEnd} 題`;
   updateTopbarScore(a.score || 0);
 
+  const todayDateStr = dateForDay(a.weekIndex, a.weekday);
   const sundayHint = document.getElementById("sundayHint");
   if (a.weekday === 7) {
-    document.getElementById("todayTag").textContent = "週日 · 本週總複習";
+    document.getElementById("todayTag").textContent = `${todayDateStr} · 本週總複習`;
     document.getElementById("todayRange").textContent = `題號 ${a.weekStart}~${a.weekEnd}（全部混合）`;
     document.getElementById("todayHeading").textContent = "今天把這週的單字全部混合再看一次";
     document.getElementById("goStudyBtn").textContent = "看本週單字";
     sundayHint.textContent = "今天測驗會從整週題目隨機出題";
   } else {
-    document.getElementById("todayTag").textContent = `${DAY_NAMES[a.weekday]} · 每日十字`;
+    document.getElementById("todayTag").textContent = `${todayDateStr} · ${DAY_NAMES[a.weekday]} · 每日十字`;
     document.getElementById("todayRange").textContent = `題號 ${a.todayStart}~${a.todayEnd}`;
     document.getElementById("todayHeading").textContent = "先看過今天的十個單字，背熟再測驗";
     document.getElementById("goStudyBtn").textContent = "看今日單字";
@@ -350,6 +352,17 @@ function wordsInRange(start, end) {
     return (a.weekWords || []).filter(w => w.id >= start && w.id <= end);
   }
   return WORD_BANK_FULL.filter(w => w.id >= start && w.id <= end);
+}
+
+// 第 weekIndex 週、第 day 天（1~6=週一~週六，7=週日）對應的實際日曆日期
+// （開課週一日期 + 過了幾週 + 星期幾），格式化成「9/1（一）」方便老師/學生對照
+function dateForDay(weekIndex, day) {
+  const a = state.assignment;
+  const monday = new Date(a.programMonday + "T00:00:00");
+  const d = new Date(monday);
+  d.setDate(monday.getDate() + weekIndex * 7 + (Math.min(day, 7) - 1));
+  const weekdayChar = "一二三四五六日"[Math.min(day, 7) - 1];
+  return `${d.getMonth() + 1}/${d.getDate()}（${weekdayChar}）`;
 }
 
 // 這個範圍內的題號是不是「全部都答對過」（不分中文卷／英文卷，對過一次就算）
@@ -433,7 +446,8 @@ function renderWeekPanel() {
 
   document.getElementById("weekPanelTitle").textContent = label;
   document.getElementById("weekPanelSub").textContent =
-    weekStart > a.wordBankMax ? "這一週已經超出題庫範圍了" : `題號 ${weekStart}~${weekEnd}`;
+    weekStart > a.wordBankMax ? "這一週已經超出題庫範圍了"
+      : `${dateForDay(wi, 1)}~${dateForDay(wi, 6)} · 題號 ${weekStart}~${weekEnd}`;
   document.getElementById("weekPrevBtn").disabled = wi <= 0;
   document.getElementById("weekNextBtn").disabled = weekRangeFor(wi + 1).start > a.wordBankMax;
 
@@ -457,7 +471,7 @@ function renderWeekPanel() {
     items.push(`
       <li class="week-day-item${isToday ? " is-today" : ""}${done ? " is-done" : ""}${(empty || locked) ? " is-locked" : ""}" data-week="${wi}" data-day="${day}">
         <span class="week-day-label">${DAY_NAMES[day]}</span>
-        <span class="week-day-range">${empty ? "超出題庫範圍" : `題號 ${start}~${end}`}</span>
+        <span class="week-day-range">${empty ? "超出題庫範圍" : `<b class="week-day-date">${dateForDay(wi, day)}</b> · 題號 ${start}~${end}`}</span>
         ${tag}
       </li>`);
   }
@@ -475,7 +489,7 @@ function renderWeekPanel() {
     items.push(`
       <li class="week-day-item week-day-sunday${sunToday ? " is-today" : ""}${sunDone ? " is-done" : ""}${(sunEmpty || sunLocked) ? " is-locked" : ""}" data-week="${wi}" data-day="7">
         <span class="week-day-label">週日</span>
-        <span class="week-day-range">${sunEmpty ? "超出題庫範圍" : `本週混合複習 題號 ${weekStart}~${weekEnd}`}</span>
+        <span class="week-day-range">${sunEmpty ? "超出題庫範圍" : `<b class="week-day-date">${dateForDay(wi, 7)}</b> · 本週混合複習 題號 ${weekStart}~${weekEnd}`}</span>
         ${sunTag}
       </li>`);
   }
