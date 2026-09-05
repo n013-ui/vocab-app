@@ -67,9 +67,8 @@ body{
 }
 .brand-title{
   font-family:var(--serif); font-weight:600; font-size:32px; line-height:1.3;
-  margin:0 0 10px;
+  margin:0 0 28px;
 }
-.brand-sub{color:var(--ink-soft); font-size:14px; margin:0 0 28px;}
 #loginForm{display:flex; flex-direction:column; gap:14px;}
 #loginForm label{font-size:13px; color:var(--ink-soft); display:flex; flex-direction:column; gap:6px;}
 #loginForm input{
