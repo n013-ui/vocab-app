@@ -231,6 +231,17 @@ function handleSubmitAnswer({ account, wordId, en, zh, mode, given, correct, ski
   const isCorrect = !!correct;
   const now = new Date();
 
+  // 一定要在寫入作答紀錄之前先判斷是否計分：isScoringEligible_ 會重新讀整張
+  // 作答紀錄表，若先 appendRow 再判斷，會把「剛剛才寫進去的這一列」也算成
+  // 「上一次作答」，時間差永遠是 0，導致每一次作答都被誤判成「還在冷卻期內」
+  // 而完全不計分（不管答對答錯，分數永遠不會變動）。
+  let scoringEligible = false;
+  if (!skipScore) {
+    // skipScore＝true 時（例如週日錯題複習）完全不計分，連「算不算第一次」都不用判斷，
+    // 也不會影響之後真正計分那次的冷卻時間判斷基準（因為時間戳記還是照樣寫進作答紀錄）
+    scoringEligible = isScoringEligible_(account, wordId, modeLabel, now);
+  }
+
   const logSheet = getSheet_(SHEET_LOG);
   logSheet.appendRow([now, account, wordId, en, zh, modeLabel, given || "", isCorrect]);
 
@@ -240,15 +251,9 @@ function handleSubmitAnswer({ account, wordId, en, zh, mode, given, correct, ski
 
   let delta = 0;
   let newScore = null;
-  let scoringEligible = false;
-  if (!skipScore) {
-    // skipScore＝true 時（例如週日錯題複習）完全不計分，連「算不算第一次」都不用判斷，
-    // 也不會影響之後真正計分那次的冷卻時間判斷基準（因為時間戳記還是照樣寫進作答紀錄）
-    scoringEligible = isScoringEligible_(account, wordId, modeLabel, now);
-    if (scoringEligible) {
-      delta = isCorrect ? 1 : -0.5;
-      newScore = addStudentScore_(account, delta);
-    }
+  if (scoringEligible) {
+    delta = isCorrect ? 1 : -0.5;
+    newScore = addStudentScore_(account, delta);
   }
 
   // API 欄位名稱維持 firstAttempt（前端沿用），但意義已經不只是「有史以來第一次」，

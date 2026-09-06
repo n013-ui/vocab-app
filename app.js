@@ -20,17 +20,45 @@ const DAY_NAMES = ["", "週一", "週二", "週三", "週四", "週五", "週六
 // ------------------------------------------------------------------------
 // 中文答案批改：去除詞性標籤／括號註記後，用「、,，;；」與空白切成多個可接受答案
 // 例："真相、真理、真實性(n)" -> ["真相","真理","真實性"]
+//
+// 有些單字的中文欄位會在句子「中間」放佔位符提示，代表這裡本來就是可以自由
+// 發揮的空格，不是要求學生一字不差照打，例如：
+//   "直到(…為止)(prep)"  → 只要求「直到」「為止」都出現，中間打什麼都算對
+//   "在(某人)之後(片)"   → 只要求「在」「之後」都出現，中間打什麼都算對
+// PLACEHOLDER_RE 用來認出這些佔位符（半形...、全形…/⋯、"某人/某物"這類泛指詞）。
+// 括號內容若含佔位符就整段保留（不能像詞性標籤一樣整段刪掉，否則佔位符前後
+// 真正需要的字也會一起不見）；括號內容若不含佔位符，維持原本「當作詞性標籤
+// 整段刪除」的行為，不影響其他單字。
 // ------------------------------------------------------------------------
+const PLACEHOLDER_RE = /(?:\.{2,}|…+|⋯+|某(?:人|物|事|地|種|些))/;
+
+// 括號內容含佔位符時，同時保留「整段括號連佔位符一起拿掉」（跟以前一樣，例如
+// "till" 打"直到"不含"為止"也算對）跟「拆開括號、保留裡面文字」（讓
+// checkAnswer 用寬鬆比對），兩種都算可接受答案的來源，只會變多不會變少，
+// 確保这次修正不會讓任何原本判對的答案變成判錯。
 function acceptedZhAnswers(zh) {
-  const core = zh.replace(/\([^()]*\)/g, "");
-  const parts = core.split(/[、,，;；\s]+/).map(s => s.trim()).filter(Boolean);
+  const strip = zh.replace(/\([^()]*\)/g, "");
+  const loose = zh.replace(/\(([^()]*)\)/g, (_, inner) => (PLACEHOLDER_RE.test(inner) ? inner : ""));
+  const parts = [...strip.split(/[、,，;；\s]+/), ...loose.split(/[、,，;；\s]+/)]
+    .map(s => s.trim())
+    .filter(Boolean);
   return [...new Set(parts)];
+}
+
+// 正確答案樣板裡如果有佔位符，代表「佔位符的位置」本來就允許任意文字（含沒有
+// 填任何字），只要求佔位符前後的固定文字依序出現即可；沒有佔位符的樣板，維持
+// 原本「一字不差」的嚴格比對，避免亂打也能過關。
+function answerMatchesTemplate(template, answer) {
+  if (!PLACEHOLDER_RE.test(template)) return answer === template;
+  const segments = template.split(PLACEHOLDER_RE)
+    .map(s => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  return new RegExp(segments.join(".*?")).test(answer);
 }
 
 function checkAnswer(word, mode, raw) {
   const answer = raw.trim();
   if (mode === "en") return answer.toLowerCase() === word.en.trim().toLowerCase();
-  return acceptedZhAnswers(word.zh).includes(answer);
+  return acceptedZhAnswers(word.zh).some(template => answerMatchesTemplate(template, answer));
 }
 
 function shuffle(arr) {
