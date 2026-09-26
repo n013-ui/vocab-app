@@ -959,7 +959,7 @@ const WORD_BANK_FULL = [
   { id: 955, en: "whom", zh: "(who的受格)誰(pron)" },
   { id: 956, en: "hang", zh: "懸掛、吊(v)(pt&pp:hung) 吊死、絞死(v)(pt&pp: hanged)" },
   { id: 957, en: "discussion", zh: "討論、談論(n)" },
-  { id: 958, en: "T-shirt T", zh: "恤(n)" },
+  { id: 958, en: "T-shirt", zh: "T恤(n)" },
   { id: 959, en: "Thanksgiving Day", zh: "感恩節(n)" },
   { id: 960, en: "direction", zh: "方向、方位(複)使用說明(n)" },
   { id: 961, en: "wing", zh: "翅膀(n)" },

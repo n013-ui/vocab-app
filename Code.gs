@@ -333,18 +333,23 @@ function updateWrongBank_({ account, wordId, en, zh, mode, correct }) {
 }
 
 // ------------------------------------------------------------------------
-// 取得學習進度（哪些題號已經「答對過」，不管是中文卷還是英文卷，只要對過一次
-// 就算精熟；前端用這個判斷每天/每週有沒有完成、目前是落後還是超前進度）
+// 取得學習進度（哪些題號已經「中文卷、英文卷都答對過」才算精熟，只對其中一種
+// 不算；前端用這個判斷每天/每週有沒有完成、目前是落後還是超前進度）
 // ------------------------------------------------------------------------
 function handleGetProgress({ account }) {
   const { rows } = readTable_(SHEET_LOG);
-  const mastered = {};
+  const correctModes = {}; // 題號 → { 中文卷: true, 英文卷: true }
   rows.forEach(r => {
     if (String(r["帳號"]) !== String(account)) return;
     const isCorrect = r["是否正確"] === true || String(r["是否正確"]).toUpperCase() === "TRUE";
-    if (isCorrect) mastered[Number(r["題號"])] = true;
+    if (!isCorrect) return;
+    const id = Number(r["題號"]);
+    (correctModes[id] = correctModes[id] || {})[String(r["測驗類型"])] = true;
   });
-  return { ok: true, masteredIds: Object.keys(mastered).map(Number) };
+  const masteredIds = Object.keys(correctModes)
+    .filter(id => correctModes[id][MODE_LABEL.zh] && correctModes[id][MODE_LABEL.en])
+    .map(Number);
+  return { ok: true, masteredIds };
 }
 
 // ------------------------------------------------------------------------

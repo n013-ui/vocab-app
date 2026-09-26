@@ -18,47 +18,93 @@ const WEEK_COUNT = DAILY_COUNT * 6; // 一週總字數 = 60
 const DAY_NAMES = ["", "週一", "週二", "週三", "週四", "週五", "週六", "週日"];
 
 // ------------------------------------------------------------------------
-// 中文答案批改：去除詞性標籤／括號註記後，用「、,，;；」與空白切成多個可接受答案
-// 例："真相、真理、真實性(n)" -> ["真相","真理","真實性"]
+// 答案批改：所有「符號」一律不要求（學生打不出來的 [ ] … / ( ) - ' 等等，
+// 打了、沒打、打成別的符號都不影響對錯），只看字本身。
 //
-// 有些單字的中文欄位會在句子「中間」放佔位符提示，代表這裡本來就是可以自由
-// 發揮的空格，不是要求學生一字不差照打，例如：
-//   "直到(…為止)(prep)"  → 只要求「直到」「為止」都出現，中間打什麼都算對
-//   "在(某人)之後(片)"   → 只要求「在」「之後」都出現，中間打什麼都算對
-// PLACEHOLDER_RE 用來認出這些佔位符（半形...、全形…/⋯、"某人/某物"這類泛指詞）。
-// 括號內容若含佔位符就整段保留（不能像詞性標籤一樣整段刪掉，否則佔位符前後
-// 真正需要的字也會一起不見）；括號內容若不含佔位符，維持原本「當作詞性標籤
-// 整段刪除」的行為，不影響其他單字。
+// 中文：先把中文欄位展開成多個可接受答案樣板，例：
+//   "真相、真理、真實性(n)"   → 真相／真理／真實性（詞性標籤拿掉，用、,;空白切開）
+//   "[計]資料(n)"             → 「計＋資料」都有寫到就對（前後擺什麼都行），只寫「資料」也對
+//   "直到(…為止)(prep)"       → 「直到＋為止」都有寫到就對，只寫「直到」也對
+//   "使…平靜/鎮定(vt)"        → 斜線是「二選一」：使…平靜、使…鎮定
+// 每個樣板再用「符號／佔位符（…、某人、某物…）」切成幾段必要文字：
+//   只有一段 → 學生答案（去掉符號後）要等於它，或答案用符號/空白隔開的其中一段等於它
+//             （例：答「真相、真理」也算對；但「不快樂的」不會被當成「快樂的」）
+//   兩段以上 → 每一段都有出現在學生答案裡就算對，順序、前後、中間擺什麼都不管
 // ------------------------------------------------------------------------
 const PLACEHOLDER_RE = /(?:\.{2,}|…+|⋯+|某(?:人|物|事|地|種|些))/;
+const SYMBOL_RE = /[^\p{L}\p{N}]+/gu;             // 字母、數字（含中文字）以外都算符號
+const ZH_SEPARATOR_RE = /[、,，;；\s]+/;             // 分隔「不同答案」的符號
 
-// 括號內容含佔位符時，同時保留「整段括號連佔位符一起拿掉」（跟以前一樣，例如
-// "till" 打"直到"不含"為止"也算對）跟「拆開括號、保留裡面文字」（讓
-// checkAnswer 用寬鬆比對），兩種都算可接受答案的來源，只會變多不會變少，
-// 確保这次修正不會讓任何原本判對的答案變成判錯。
-function acceptedZhAnswers(zh) {
-  const strip = zh.replace(/\([^()]*\)/g, "");
-  const loose = zh.replace(/\(([^()]*)\)/g, (_, inner) => (PLACEHOLDER_RE.test(inner) ? inner : ""));
-  const parts = [...strip.split(/[、,，;；\s]+/), ...loose.split(/[、,，;；\s]+/)]
-    .map(s => s.trim())
-    .filter(Boolean);
-  return [...new Set(parts)];
+function normalizeText(s) {
+  return String(s).toLowerCase().replace(SYMBOL_RE, "");
 }
 
-// 正確答案樣板裡如果有佔位符，代表「佔位符的位置」本來就允許任意文字（含沒有
-// 填任何字），只要求佔位符前後的固定文字依序出現即可；沒有佔位符的樣板，維持
-// 原本「一字不差」的嚴格比對，避免亂打也能過關。
-function answerMatchesTemplate(template, answer) {
-  if (!PLACEHOLDER_RE.test(template)) return answer === template;
-  const segments = template.split(PLACEHOLDER_RE)
-    .map(s => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
-  return new RegExp(segments.join(".*?")).test(answer);
+// 把中文欄位展開成多種寫法的字串（只會讓可接受答案變多，不會變少）
+function expandZhVariants(zh) {
+  let variants = [zh];
+  const expand = (fn) => { variants = [...new Set(variants.flatMap(fn))]; };
+
+  // 斜線二選一："平靜/鎮定" → "平靜"、"鎮定"
+  const SLASH_RE = /([\p{L}\p{N}]+)\/([\p{L}\p{N}]+)/u;
+  for (let guard = 0; guard < 5 && variants.some(v => SLASH_RE.test(v)); guard++) {
+    expand(v => {
+      const m = v.match(SLASH_RE);
+      if (!m) return [v];
+      return [v.replace(SLASH_RE, m[1]), v.replace(SLASH_RE, m[2])];
+    });
+  }
+
+  // 方括號領域標籤 [計][數][口語]：寫了要跟後面的字一起算（用「·」連成同一個樣板
+  // 的兩段），沒寫也可以
+  expand(v => [
+    v.replace(/\[([^\[\]]*)\]/g, "$1·"),
+    v.replace(/\[[^\[\]]*\]/g, " "),
+  ]);
+
+  // 圓括號：詞性標籤、註記整段拿掉（前後黏在一起、或當成分隔都接受）；
+  // 含佔位符的（…為止）則保留裡面文字，讓「直到…為止」也能比對
+  expand(v => [
+    v.replace(/\([^()]*\)/g, ""),
+    v.replace(/\([^()]*\)/g, " "),
+    v.replace(/\(([^()]*)\)/g, (_, inner) => (PLACEHOLDER_RE.test(inner) ? inner : " ")),
+  ]);
+  return variants;
+}
+
+// 每個可接受答案樣板 → 必要文字段落陣列（已去符號、轉小寫）
+function acceptedZhAnswers(zh) {
+  const seen = new Set();
+  const templates = [];
+  expandZhVariants(zh).forEach(v => {
+    v.split(ZH_SEPARATOR_RE).forEach(t => {
+      const segments = t.split(PLACEHOLDER_RE)
+        .flatMap(p => p.split(SYMBOL_RE))
+        .map(s => s.toLowerCase())
+        .filter(Boolean);
+      const key = segments.join("|");
+      if (segments.length && !seen.has(key)) { seen.add(key); templates.push(segments); }
+    });
+  });
+  return templates;
+}
+
+function answerMatchesTemplate(segments, answer) {
+  const whole = normalizeText(answer);
+  if (!whole) return false;
+  if (segments.length === 1) {
+    if (whole === segments[0]) return true;
+    return answer.split(SYMBOL_RE).some(p => p.toLowerCase() === segments[0]);
+  }
+  return segments.every(seg => whole.includes(seg));
 }
 
 function checkAnswer(word, mode, raw) {
   const answer = raw.trim();
-  if (mode === "en") return answer.toLowerCase() === word.en.trim().toLowerCase();
-  return acceptedZhAnswers(word.zh).some(template => answerMatchesTemplate(template, answer));
+  if (mode === "en") {
+    const given = normalizeText(answer);
+    return !!given && given === normalizeText(word.en);
+  }
+  return acceptedZhAnswers(word.zh).some(segments => answerMatchesTemplate(segments, answer));
 }
 
 function shuffle(arr) {
@@ -122,13 +168,16 @@ function demoGetAssignment() {
   };
 }
 
-// 本機示範模式的「學習進度」：掃 localStorage 裡的作答歷史，找出「答對過」的題號
-// （不管是中文卷還是英文卷，只要對過一次就算精熟），邏輯跟 Code.gs 的 handleGetProgress 一致
+// 本機示範模式的「學習進度」：掃 localStorage 裡的作答歷史，找出「中文卷、英文卷
+// 都答對過」的題號（只對其中一種不算精熟），邏輯跟 Code.gs 的 handleGetProgress 一致
 function demoGetProgress() {
   const s = demoLoadStore();
-  const mastered = new Set();
-  (s.history || []).forEach(h => { if (h.correct) mastered.add(h.wordId); });
-  return { ok: true, masteredIds: [...mastered] };
+  const zhOk = new Set(), enOk = new Set();
+  (s.history || []).forEach(h => {
+    if (!h.correct) return;
+    (h.mode === "zh" ? zhOk : enOk).add(h.wordId);
+  });
+  return { ok: true, masteredIds: [...zhOk].filter(id => enOk.has(id)) };
 }
 
 const RESCORE_COOLDOWN_MS = 30 * 24 * 60 * 60 * 1000; // 跟 Code.gs 的 RESCORE_COOLDOWN_DAYS 一致
@@ -415,7 +464,7 @@ function dateForDay(weekIndex, day) {
   return `${d.getMonth() + 1}/${d.getDate()}（${weekdayChar}）`;
 }
 
-// 這個範圍內的題號是不是「全部都答對過」（不分中文卷／英文卷，對過一次就算）
+// 這個範圍內的題號是不是「全部都精熟」（中文卷、英文卷都答對過才算）
 function isRangeMastered(start, end) {
   if (start > end) return false;
   for (let id = start; id <= end; id++) {
