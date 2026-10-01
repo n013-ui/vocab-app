@@ -177,7 +177,7 @@ function demoGetProgress() {
     if (!h.correct) return;
     (h.mode === "zh" ? zhOk : enOk).add(h.wordId);
   });
-  return { ok: true, masteredIds: [...zhOk].filter(id => enOk.has(id)) };
+  return { ok: true, masteredIds: [...zhOk].filter(id => enOk.has(id)), zhIds: [...zhOk], enIds: [...enOk] };
 }
 
 const RESCORE_COOLDOWN_MS = 30 * 24 * 60 * 60 * 1000; // 跟 Code.gs 的 RESCORE_COOLDOWN_DAYS 一致
@@ -287,6 +287,10 @@ const state = {
   assignment: null,        // 最近一次 apiGetAssignment() 的結果
   wrongBank: [],           // 最近一次 apiGetWrongBank() 的結果
   masteredIds: new Set(),  // 最近一次 apiGetProgress() 的結果：答對過的題號（判斷完成度／進度用）
+  zhOkIds: null,           // 答對過中文卷的題號（舊版後端沒回傳時為 null，只能列題號、不分卷別）
+  enOkIds: null,           // 答對過英文卷的題號
+  quizRound: 1,            // 測驗第幾輪：答錯的題目會自動進下一輪訂正，直到全部答對
+  quizFirstAnswers: null,  // 第一輪的作答結果（結算頁分數／明細以第一輪為準）
   viewWeekIndex: null,     // 目前「本週進度」面板正在看第幾週（null＝目前實際那一週）
   studyWords: [],          // 目前正在背誦／即將測驗的單字（今日／本週／點選的某一天）
   studyIndex: 0,
@@ -409,6 +413,8 @@ async function renderHome() {
 
   const prog = await apiGetProgress();
   state.masteredIds = new Set(prog.masteredIds || []);
+  state.zhOkIds = prog.zhIds ? new Set(prog.zhIds) : null;
+  state.enOkIds = prog.enIds ? new Set(prog.enIds) : null;
 
   state.courseProgress = computeCourseProgress();
   state.viewWeekIndex = a.weekIndex; // 每次回首頁都重設回「目前實際那一週」
@@ -471,6 +477,31 @@ function isRangeMastered(start, end) {
     if (!state.masteredIds.has(id)) return false;
   }
   return true;
+}
+
+// 這個範圍內還沒精熟的題目，附上缺的是哪一卷（中／英／中英），給「尚未完成」的
+// 那天列出卡住的字用；started＝這天有沒有任何一題答對過任一卷（判斷是不是根本還沒開始）
+function rangeMissing(start, end) {
+  const missing = [];
+  let started = false;
+  for (let id = start; id <= end; id++) {
+    const zhOk = state.zhOkIds ? state.zhOkIds.has(id) : state.masteredIds.has(id);
+    const enOk = state.enOkIds ? state.enOkIds.has(id) : state.masteredIds.has(id);
+    if (zhOk || enOk) started = true;
+    if (zhOk && enOk) continue;
+    const modes = state.zhOkIds ? (zhOk ? "" : "中") + (enOk ? "" : "英") : "";
+    missing.push({ id, word: findWord(id), modes });
+  }
+  return { missing, started };
+}
+
+function missingHtml(start, end) {
+  const { missing, started } = rangeMissing(start, end);
+  if (!missing.length) return "";
+  if (!started) return `<span class="week-day-missing">還沒開始做</span>`;
+  const list = missing.map(m =>
+    `${m.id} ${m.word ? m.word.en : ""}${m.modes ? `（${m.modes}）` : ""}`).join("、");
+  return `<span class="week-day-missing">還差：${list}</span>`;
 }
 
 // 課程從第 0 週第 1 天算起、累計到第 weekIndex 週第 day 天，是第幾天
@@ -582,10 +613,16 @@ function renderWeekPanel() {
     else if (done) tag = '<span class="week-day-tag done">✓ 已完成</span>';
     else if (isToday) tag = '<span class="week-day-tag today">今天</span>';
     else if (isPastDue) tag = '<span class="week-day-tag pending">尚未完成</span>';
+    // 過期沒完成的天一律列出卡住的字；今天則只在已經開始做之後才列，避免一打開就列滿十個字
+    let missing = "";
+    if (!empty && !locked && !done && (isPastDue || isToday)) {
+      missing = missingHtml(start, end);
+      if (isToday && !rangeMissing(start, end).started) missing = "";
+    }
     items.push(`
       <li class="week-day-item${isToday ? " is-today" : ""}${done ? " is-done" : ""}${(empty || locked) ? " is-locked" : ""}" data-week="${wi}" data-day="${day}">
         <span class="week-day-label">${DAY_NAMES[day]}</span>
-        <span class="week-day-range">${empty ? "超出題庫範圍" : `<b class="week-day-date">${dateForDay(wi, day)}</b> · 題號 ${start}~${end}`}</span>
+        <span class="week-day-range">${empty ? "超出題庫範圍" : `<b class="week-day-date">${dateForDay(wi, day)}</b> · 題號 ${start}~${end}`}${missing}</span>
         ${tag}
       </li>`);
   }
@@ -777,15 +814,23 @@ document.querySelectorAll(".pick-card").forEach(btn => {
 // ------------------------------------------------------------------------
 // 測驗進行
 // ------------------------------------------------------------------------
-function startQuiz() {
+// retry＝true：同一份測驗答錯的題目進入下一輪訂正（不是重新開始一份新測驗）
+function startQuiz(retry = false) {
+  if (!retry) {
+    state.quizRound = 1;
+    state.quizFirstAnswers = null;
+  }
   state.quizWords = shuffle(state.pendingQuizWords);
   state.quizIndex = 0;
   state.quizAnswers = [];
   setQuizBusy(false);
-  document.getElementById("quizTitle").textContent =
+  const baseTitle =
     state.quizSource === "wrong" ? "錯題重測"
       : state.quizSource === "sunday" ? "週日錯題複習"
         : (state.quizMode === "zh" ? "中文卷" : "英文卷");
+  document.getElementById("quizTitle").textContent = state.quizRound === 1
+    ? baseTitle
+    : `${baseTitle} · 訂正第 ${state.quizRound - 1} 輪`;
   renderQuizDots();
   renderQuizQuestion();
   showView("view-quiz");
@@ -809,11 +854,18 @@ function renderQuizQuestion() {
   input.disabled = false;
   input.focus();
   document.getElementById("quizFeedback").classList.add("hidden");
+  document.getElementById("quizSubmitBtn").disabled = true; // 還沒輸入答案前不能送出
   document.getElementById("quizSubmitBtn").classList.remove("hidden");
   document.getElementById("quizNextBtn").classList.add("hidden");
 }
 
 document.getElementById("quizSubmitBtn").addEventListener("click", submitQuizAnswer);
+
+// 沒輸入、或只輸入空白時，送出按鈕維持停用，避免誤觸送出空白答案
+document.getElementById("quizInput").addEventListener("input", (e) => {
+  if (state.quizLocked) return;
+  document.getElementById("quizSubmitBtn").disabled = !e.target.value.trim();
+});
 
 // 防止「送出答案」「下一題」被連續誤觸（連按 Enter、雙擊）：兩次動作之間至少間隔
 // 400ms，避免答完題按太快，下一題還沒渲染好就把 Enter 又吃成「送出空白答案」
@@ -848,8 +900,10 @@ document.addEventListener("keydown", (e) => {
 });
 
 async function submitQuizAnswer() {
-  if (state.quizLocked || !quizActionAllowed()) return;
   const input = document.getElementById("quizInput");
+  // 空白答案一律擋下（Enter 鍵也走這裡，按鈕停用擋不到）
+  if (!input.value.trim()) { input.focus(); return; }
+  if (state.quizLocked || !quizActionAllowed()) return;
   const submitBtn = document.getElementById("quizSubmitBtn");
   // 先立刻鎖住輸入框、按鈕、整張測驗卡片，避免網路回應還沒回來前，重複按 Enter／
   // 按鈕造成同一題送出兩次、或是下一題打字時被判成上一題的答案
@@ -879,7 +933,11 @@ async function submitQuizAnswer() {
   setQuizBusy(false);
   submitBtn.disabled = false;
   submitBtn.classList.add("hidden");
-  document.getElementById("quizNextBtn").classList.remove("hidden");
+  const nextBtn = document.getElementById("quizNextBtn");
+  const isLast = state.quizIndex === state.quizWords.length - 1;
+  const hasWrong = state.quizAnswers.some(a => a && !a.correct);
+  nextBtn.textContent = !isLast ? "下一題" : hasWrong ? "訂正答錯的題目" : "看結果";
+  nextBtn.classList.remove("hidden");
   renderQuizDots();
 }
 
@@ -888,6 +946,16 @@ document.getElementById("quizNextBtn").addEventListener("click", async () => {
   if (state.quizIndex < state.quizWords.length - 1) {
     state.quizIndex++;
     renderQuizQuestion();
+    return;
+  }
+  // 最後一題答完：這一輪有答錯的，就把答錯的題目（同一卷別）再考一輪，直到全部
+  // 答對才結算——避免帶著沒過的字直接跳去下一天，那天就會一直卡在「尚未完成」
+  const wrongs = state.quizAnswers.filter(a => !a.correct);
+  if (!state.quizFirstAnswers) state.quizFirstAnswers = state.quizAnswers.slice();
+  if (wrongs.length) {
+    state.pendingQuizWords = wrongs.map(a => ({ word: a.word, mode: a.mode }));
+    state.quizRound++;
+    startQuiz(true);
   } else {
     state.quizLocked = true; // 結算頁要重新抓一次首頁資料，鎖住避免這段期間誤觸
     await renderQuizResult();
@@ -900,22 +968,26 @@ document.getElementById("quizNextBtn").addEventListener("click", async () => {
 // 結果
 // ------------------------------------------------------------------------
 async function renderQuizResult() {
-  const total = state.quizAnswers.length;
-  const correctN = state.quizAnswers.filter(a => a.correct).length;
+  // 分數與明細以第一輪為準；訂正輪的作答照樣寫進作答紀錄（算完成度、清錯題本），
+  // 但都在冷卻期內，本來就不會再計分
+  const answers = state.quizFirstAnswers || state.quizAnswers;
+  const total = answers.length;
+  const correctN = answers.filter(a => a.correct).length;
   document.getElementById("resultScore").textContent = `${correctN} / ${total}`;
-  document.getElementById("resultSub").textContent =
-    `答對 ${correctN} 題，答錯 ${total - correctN} 題已記入錯題本`;
+  document.getElementById("resultSub").textContent = correctN === total
+    ? `全部 ${total} 題一次答對！`
+    : `第一次答對 ${correctN} 題，答錯的 ${total - correctN} 題經過 ${state.quizRound - 1} 輪訂正，已全部答對`;
 
-  const earned = state.quizAnswers.reduce((sum, a) => sum + (a.delta || 0), 0);
+  const earned = answers.reduce((sum, a) => sum + (a.delta || 0), 0);
   const pointsEl = document.getElementById("resultPoints");
-  if (state.quizAnswers.some(a => a.scored)) {
+  if (answers.some(a => a.scored)) {
     pointsEl.textContent = `這次測驗獲得 ${earned > 0 ? "+" : ""}${formatScore(earned)} 分`;
   } else {
     pointsEl.textContent = "這是重複練習，不計分";
   }
 
   const list = document.getElementById("resultList");
-  list.innerHTML = state.quizAnswers.map(a => {
+  list.innerHTML = answers.map(a => {
     const pointTag = a.scored
       ? `<span class="point-tag earned">${a.delta > 0 ? "+" : ""}${formatScore(a.delta)} 分</span>`
       : `<span class="point-tag">不計分</span>`;

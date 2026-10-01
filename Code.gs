@@ -349,7 +349,11 @@ function handleGetProgress({ account }) {
   const masteredIds = Object.keys(correctModes)
     .filter(id => correctModes[id][MODE_LABEL.zh] && correctModes[id][MODE_LABEL.en])
     .map(Number);
-  return { ok: true, masteredIds };
+  // zhIds／enIds：各自答對過中文卷／英文卷的題號，前端用來在「尚未完成」的那天
+  // 列出還差哪幾題、差的是中文卷還是英文卷
+  const zhIds = Object.keys(correctModes).filter(id => correctModes[id][MODE_LABEL.zh]).map(Number);
+  const enIds = Object.keys(correctModes).filter(id => correctModes[id][MODE_LABEL.en]).map(Number);
+  return { ok: true, masteredIds, zhIds, enIds };
 }
 
 // ------------------------------------------------------------------------
