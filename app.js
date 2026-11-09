@@ -684,7 +684,7 @@ function startDayStudy(weekIndex, day) {
   const weekLabel = rel === 0 ? "" : rel === -1 ? "上週" : rel === 1 ? "下週" : `第${weekIndex + 1}週`;
   document.getElementById("studyTitle").textContent = `${weekLabel}${DAY_NAMES[day]}單字`;
   renderStudyDots();
-  renderStudyCard();
+  renderStudyMode();
   showView("view-study");
 }
 
@@ -732,9 +732,49 @@ document.getElementById("goStudyBtn").addEventListener("click", () => {
   state.studyFlipped = {};
   document.getElementById("studyTitle").textContent = "今日單字";
   renderStudyDots();
-  renderStudyCard();
+  renderStudyMode();
   showView("view-study");
 });
+
+// 背誦方式：一張一張看（card）或全部總覽（list），學生自己選，記在瀏覽器裡下次沿用
+const STUDY_MODE_KEY = "vocab_study_mode";
+function getStudyMode() {
+  try { return localStorage.getItem(STUDY_MODE_KEY) === "list" ? "list" : "card"; }
+  catch (e) { return "card"; }
+}
+function setStudyMode(mode) {
+  try { localStorage.setItem(STUDY_MODE_KEY, mode); } catch (e) {}
+  renderStudyMode();
+}
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+function renderStudyMode() {
+  const mode = getStudyMode();
+  document.querySelectorAll(".study-mode-btn").forEach(btn => {
+    const on = btn.dataset.studyMode === mode;
+    btn.classList.toggle("active", on);
+    btn.setAttribute("aria-selected", on ? "true" : "false");
+  });
+  document.getElementById("studyCardPane").classList.toggle("hidden", mode !== "card");
+  document.getElementById("studyListPane").classList.toggle("hidden", mode !== "list");
+  if (mode === "list") {
+    const words = currentStudyWords();
+    document.getElementById("studyList").innerHTML = words.map(w =>
+      `<li class="study-list-item">
+        <span class="study-list-no">${w.id}</span>
+        <span class="study-list-en">${escapeHtml(w.en)}</span>
+        <span class="study-list-zh">${escapeHtml(w.zh)}</span>
+      </li>`).join("");
+    const doneBtn = document.getElementById("studyDoneBtn");
+    doneBtn.classList.remove("hidden");
+    doneBtn.textContent = "看完了，去測驗";
+  } else {
+    renderStudyCard();
+  }
+}
+document.querySelectorAll(".study-mode-btn").forEach(btn =>
+  btn.addEventListener("click", () => setStudyMode(btn.dataset.studyMode)));
 
 function renderStudyDots() {
   const words = currentStudyWords();

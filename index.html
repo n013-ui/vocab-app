@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,500;0,600;1,500&family=Noto+Sans+TC:wght@400;500;700;900&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=20261001">
+<link rel="stylesheet" href="style.css?v=20261109">
 </head>
 <body>
 
@@ -109,16 +109,25 @@
         <button class="btn btn-text" data-back>← 返回</button>
         <p class="view-title" id="studyTitle">今日單字</p>
       </div>
-      <div class="progress-dots" id="studyDots"></div>
-      <div class="flashcard" id="flashcard">
-        <p class="card-index" id="cardIndex">1 / 10</p>
-        <p class="card-en" id="cardEn">word</p>
-        <p class="card-zh hidden" id="cardZh">意思</p>
-        <p class="card-flip-hint" id="cardFlipHint">點卡片看中文意思</p>
+      <div class="study-mode-switch" role="tablist" aria-label="背誦方式">
+        <button type="button" class="study-mode-btn" data-study-mode="card" role="tab">一張一張看</button>
+        <button type="button" class="study-mode-btn" data-study-mode="list" role="tab">全部總覽</button>
       </div>
-      <div class="study-nav">
-        <button class="btn btn-ghost" id="prevCardBtn">上一個</button>
-        <button class="btn btn-primary" id="nextCardBtn">下一個</button>
+      <div id="studyCardPane">
+        <div class="progress-dots" id="studyDots"></div>
+        <div class="flashcard" id="flashcard">
+          <p class="card-index" id="cardIndex">1 / 10</p>
+          <p class="card-en" id="cardEn">word</p>
+          <p class="card-zh hidden" id="cardZh">意思</p>
+          <p class="card-flip-hint" id="cardFlipHint">點卡片看中文意思</p>
+        </div>
+        <div class="study-nav">
+          <button class="btn btn-ghost" id="prevCardBtn">上一個</button>
+          <button class="btn btn-primary" id="nextCardBtn">下一個</button>
+        </div>
+      </div>
+      <div id="studyListPane" class="hidden">
+        <ol class="study-list" id="studyList"></ol>
       </div>
       <button class="btn btn-primary btn-lg btn-block hidden" id="studyDoneBtn">背完了，去測驗</button>
     </section>
@@ -236,6 +245,6 @@
 </div>
 
 <script src="words-data.js?v=20260927"></script>
-<script src="app.js?v=20261001b"></script>
+<script src="app.js?v=20261109"></script>
 </body>
 </html>
